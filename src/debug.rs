@@ -39,7 +39,7 @@ impl<'a> Iterator for Disassembler<'a> {
                         result.push_str("<out-of-bound>");
                     }
                 }
-		Instruction::OpNegate => result.push_str("OP_NEGATE"),
+                Instruction::OpNegate => result.push_str("OP_NEGATE"),
                 Instruction::OpReturn => result.push_str("OP_RETURN"),
                 Instruction::OpInvalid => result.push_str("OP_INVALID"),
             }
