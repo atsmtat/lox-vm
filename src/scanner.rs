@@ -1,6 +1,6 @@
 use std::str::CharIndices;
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Copy, Clone, Debug, PartialEq)]
 pub enum TokenKind {
     // single character
     LeftParen,
@@ -28,7 +28,7 @@ pub enum TokenKind {
     // literals
     Identifier,
     String,
-    Number(f64),
+    Number,
 
     // keywords
     And,
@@ -62,10 +62,10 @@ impl<'a> Token<'a> {
     }
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub enum ScannerError {
-    UnterminatedString,
-    UnrecognizedChar,
+    UnterminatedString(u32),
+    UnrecognizedChar(u32),
 }
 
 pub struct Scanner<'a> {
@@ -200,7 +200,7 @@ impl<'a> Scanner<'a> {
                 _ => {}
             }
         }
-        Err(ScannerError::UnterminatedString)
+        Err(ScannerError::UnterminatedString(self.line))
     }
 
     fn number_literal(&mut self) -> Token<'a> {
@@ -218,8 +218,7 @@ impl<'a> Scanner<'a> {
         }
 
         let lexeme = self.get_lexeme();
-        let token_kind = TokenKind::Number(lexeme.parse::<f64>().unwrap());
-        Token::new(token_kind, lexeme, self.line)
+        Token::new(TokenKind::Number, lexeme, self.line)
     }
 
     fn identifier(&mut self) -> Token<'a> {
@@ -298,7 +297,7 @@ impl<'a> Scanner<'a> {
             '0'..='9' => self.number_literal(),
             'a'..='z' | 'A'..='Z' | '_' => self.identifier(),
 
-            _ => return Some(Err(ScannerError::UnrecognizedChar)),
+            _ => return Some(Err(ScannerError::UnrecognizedChar(self.line))),
         };
 
         Some(Ok(token))

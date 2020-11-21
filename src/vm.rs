@@ -1,11 +1,7 @@
 use crate::chunk::{Chunk, Instruction, Value};
+use crate::error::InterpretError;
 
 const STACK_MAX: usize = 256;
-
-pub enum InterpretError {
-    CompileError,
-    RuntimeError,
-}
 
 pub struct Vm<'a> {
     chunk: &'a Chunk,
@@ -18,6 +14,13 @@ impl<'a> Vm<'a> {
             chunk,
             stack: Vec::with_capacity(STACK_MAX),
         }
+    }
+
+    fn get_number(val: Value) -> Result<f64, InterpretError> {
+	match val {
+	    Value::Double(v) => Ok(v),
+	    _ => Err(InterpretError::RuntimeError),
+	}
     }
 
     pub fn run(&mut self) -> Result<(), InterpretError> {
@@ -36,6 +39,34 @@ impl<'a> Vm<'a> {
                     };
                     self.push(new_val);
                 }
+
+		Instruction::OpAdd => {
+		    let rhs = Self::get_number(self.pop()?)?;
+		    let lhs = Self::get_number(self.pop()?)?;
+		    let result = Value::Double(lhs + rhs);
+		    self.push(result);
+		}
+
+		Instruction::OpSubtract => {
+		    let rhs = Self::get_number(self.pop()?)?;
+		    let lhs = Self::get_number(self.pop()?)?;
+		    let result = Value::Double(lhs - rhs);
+		    self.push(result);
+		}
+
+		Instruction::OpMultiply => {
+		    let rhs = Self::get_number(self.pop()?)?;
+		    let lhs = Self::get_number(self.pop()?)?;
+		    let result = Value::Double(lhs * rhs);
+		    self.push(result);
+		}
+
+		Instruction::OpDivide => {
+		    let rhs = Self::get_number(self.pop()?)?;
+		    let lhs = Self::get_number(self.pop()?)?;
+		    let result = Value::Double(lhs / rhs);
+		    self.push(result);
+		}
 
                 Instruction::OpConstant(val_offset) => {
                     let val = self.chunk.get_constant(val_offset);

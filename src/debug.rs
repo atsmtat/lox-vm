@@ -40,6 +40,10 @@ impl<'a> Iterator for Disassembler<'a> {
                     }
                 }
                 Instruction::OpNegate => result.push_str("OP_NEGATE"),
+                Instruction::OpAdd => result.push_str("OP_ADD"),
+                Instruction::OpSubtract => result.push_str("OP_SUBTRACT"),
+                Instruction::OpMultiply => result.push_str("OP_MULTIPLY"),
+                Instruction::OpDivide => result.push_str("OP_DIVIDE"),
                 Instruction::OpReturn => result.push_str("OP_RETURN"),
                 Instruction::OpInvalid => result.push_str("OP_INVALID"),
             }

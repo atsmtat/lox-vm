@@ -1,11 +1,20 @@
 const OP_CONSTANT: u8 = 1;
 const OP_RETURN: u8 = 2;
 const OP_NEGATE: u8 = 3;
+const OP_ADD: u8 = 4;
+const OP_SUBTRACT: u8 = 5;
+const OP_MULTIPLY: u8 = 6;
+const OP_DIVIDE: u8 = 7;
+
 const OP_INVALID: u8 = u8::MAX;
 
 pub enum Instruction {
     OpConstant(u8),
     OpNegate,
+    OpAdd,
+    OpSubtract,
+    OpMultiply,
+    OpDivide,
     OpReturn,
     OpInvalid,
 }
@@ -14,8 +23,12 @@ impl From<Instruction> for Vec<u8> {
     fn from(instr: Instruction) -> Self {
         match instr {
             Instruction::OpConstant(offset) => vec![OP_CONSTANT, offset],
-            Instruction::OpNegate => vec![OP_NEGATE],
             Instruction::OpReturn => vec![OP_RETURN],
+            Instruction::OpNegate => vec![OP_NEGATE],
+            Instruction::OpAdd => vec![OP_ADD],
+            Instruction::OpSubtract => vec![OP_SUBTRACT],
+            Instruction::OpMultiply => vec![OP_MULTIPLY],
+            Instruction::OpDivide => vec![OP_DIVIDE],
             Instruction::OpInvalid => vec![OP_INVALID],
         }
     }
@@ -106,6 +119,10 @@ impl<'a> Iterator for InstructionIter<'a> {
                 }
             }
             OP_NEGATE => Instruction::OpNegate,
+            OP_ADD => Instruction::OpAdd,
+            OP_SUBTRACT => Instruction::OpSubtract,
+            OP_MULTIPLY => Instruction::OpMultiply,
+            OP_DIVIDE => Instruction::OpDivide,
             OP_RETURN => Instruction::OpReturn,
             _ => Instruction::OpInvalid,
         };

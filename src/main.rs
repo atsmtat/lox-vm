@@ -1,5 +1,7 @@
 mod chunk;
+mod compiler;
 mod debug;
+mod error;
 mod scanner;
 mod vm;
 
@@ -7,10 +9,7 @@ use std::io::{self, BufRead, Write};
 
 fn interpret(source: &str) {
     let mut chunk = chunk::Chunk::new();
-    let scanner = scanner::Scanner::new(source);
-    for tok in scanner {
-        println!("{:?}", tok)
-    }
+    compiler::compile(&source, &mut chunk);
     let mut vm = vm::Vm::new(&chunk);
     vm.run();
 }
