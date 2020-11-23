@@ -1,6 +1,6 @@
 use crate::chunk::{Chunk, Instruction, InstructionOffsetIter};
 
-pub struct Disassembler<'a> {
+struct Disassembler<'a> {
     chunk: &'a Chunk,
     iter: std::iter::Enumerate<InstructionOffsetIter<'a>>,
 }
