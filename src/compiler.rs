@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use crate::chunk::{Chunk, Instruction, Value};
+use crate::debug;
 use crate::scanner::{Scanner, Token, TokenKind, ScannerError};
 use crate::error::InterpretError;
 
@@ -10,6 +11,9 @@ pub fn compile(source: &str, chunk: &mut Chunk) -> Result<(), InterpretError> {
     if parser.had_error {
 	Err(InterpretError::CompileError)
     } else {
+	if cfg!(debug_assertions) {
+	    debug::disassemble_chunk(chunk, "code");
+	}
 	Ok(())
     }
 }
