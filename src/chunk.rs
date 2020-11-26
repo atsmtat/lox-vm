@@ -5,6 +5,9 @@ const OP_ADD: u8 = 4;
 const OP_SUBTRACT: u8 = 5;
 const OP_MULTIPLY: u8 = 6;
 const OP_DIVIDE: u8 = 7;
+const OP_TRUE: u8 = 8;
+const OP_FALSE: u8 = 9;
+const OP_NIL: u8 = 10;
 
 const OP_INVALID: u8 = u8::MAX;
 
@@ -15,6 +18,9 @@ pub enum Instruction {
     OpSubtract,
     OpMultiply,
     OpDivide,
+    OpTrue,
+    OpFalse,
+    OpNil,
     OpReturn,
     OpInvalid,
 }
@@ -29,6 +35,9 @@ impl From<Instruction> for Vec<u8> {
             Instruction::OpSubtract => vec![OP_SUBTRACT],
             Instruction::OpMultiply => vec![OP_MULTIPLY],
             Instruction::OpDivide => vec![OP_DIVIDE],
+            Instruction::OpTrue => vec![OP_TRUE],
+            Instruction::OpFalse => vec![OP_FALSE],
+            Instruction::OpNil => vec![OP_NIL],
             Instruction::OpInvalid => vec![OP_INVALID],
         }
     }
@@ -36,13 +45,15 @@ impl From<Instruction> for Vec<u8> {
 
 #[derive(Clone, Copy, Debug)]
 pub enum Value {
+    Boolean(bool),
     Double(f64),
+    Nil,
 }
 
 pub struct Chunk {
     code: Vec<u8>,
     constants: Vec<Value>,
-    pub lines: Vec<u32>,
+    lines: Vec<u32>,
 }
 
 impl Chunk {
@@ -72,6 +83,10 @@ impl Chunk {
 
     pub fn get_constant_checked(&self, index: u8) -> Option<&Value> {
         self.constants.get(index as usize)
+    }
+
+    pub fn get_line(&self, index: usize) -> u32 {
+	self.lines[index]
     }
 
     pub fn iter(&self) -> InstructionIter {
@@ -123,6 +138,9 @@ impl<'a> Iterator for InstructionIter<'a> {
             OP_SUBTRACT => Instruction::OpSubtract,
             OP_MULTIPLY => Instruction::OpMultiply,
             OP_DIVIDE => Instruction::OpDivide,
+            OP_TRUE => Instruction::OpTrue,
+            OP_FALSE => Instruction::OpFalse,
+            OP_NIL => Instruction::OpNil,
             OP_RETURN => Instruction::OpReturn,
             _ => Instruction::OpInvalid,
         };

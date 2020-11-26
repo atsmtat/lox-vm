@@ -6,6 +6,7 @@ const STACK_MAX: usize = 256;
 pub struct Vm<'a> {
     chunk: &'a Chunk,
     stack: Vec<Value>,
+    ip : usize,
 }
 
 impl<'a> Vm<'a> {
@@ -13,18 +14,28 @@ impl<'a> Vm<'a> {
         Vm {
             chunk,
             stack: Vec::with_capacity(STACK_MAX),
+	    ip: 0,
         }
     }
 
-    fn get_number(val: Value) -> Result<f64, InterpretError> {
+    fn get_number(&mut self) -> Result<f64, InterpretError> {
+	let val = self.pop()?;
 	match val {
 	    Value::Double(v) => Ok(v),
-	    _ => Err(InterpretError::RuntimeError),
+	    _ => {
+		self.report_error( "operand must be a number" );
+		return Err(InterpretError::RuntimeError);
+	    }
 	}
     }
 
+    fn report_error(&self, msg: &str) {
+	eprintln!( "[line {}] Error: {}", self.chunk.get_line(self.ip), msg);
+    }
+
     pub fn run(&mut self) -> Result<(), InterpretError> {
-        for instr in self.chunk.iter() {
+        for (instr_index, instr) in self.chunk.iter().enumerate() {
+	    self.ip = instr_index;
             match instr {
                 Instruction::OpReturn => {
                     let val = self.pop()?;
@@ -33,50 +44,48 @@ impl<'a> Vm<'a> {
                 }
 
                 Instruction::OpNegate => {
-                    let val = self.pop()?;
-                    let new_val = match val {
-                        Value::Double(v) => Value::Double(-v),
-                    };
-                    self.push(new_val);
+                    let val = self.get_number()?;
+                    let result = Value::Double(-val);
+                    self.push(result);
                 }
 
-		Instruction::OpAdd => {
-		    let rhs = Self::get_number(self.pop()?)?;
-		    let lhs = Self::get_number(self.pop()?)?;
-		    let result = Value::Double(lhs + rhs);
-		    self.push(result);
-		}
-
-		Instruction::OpSubtract => {
-		    let rhs = Self::get_number(self.pop()?)?;
-		    let lhs = Self::get_number(self.pop()?)?;
-		    let result = Value::Double(lhs - rhs);
-		    self.push(result);
-		}
-
-		Instruction::OpMultiply => {
-		    let rhs = Self::get_number(self.pop()?)?;
-		    let lhs = Self::get_number(self.pop()?)?;
-		    let result = Value::Double(lhs * rhs);
-		    self.push(result);
-		}
-
+		Instruction::OpAdd |
+		Instruction::OpSubtract |
+		Instruction::OpMultiply |
 		Instruction::OpDivide => {
-		    let rhs = Self::get_number(self.pop()?)?;
-		    let lhs = Self::get_number(self.pop()?)?;
-		    let result = Value::Double(lhs / rhs);
-		    self.push(result);
+		    self.exec_binary_op(instr)?;
 		}
+
+		Instruction::OpTrue => self.push(Value::Boolean(true)),
+		Instruction::OpFalse => self.push(Value::Boolean(false)),
+		Instruction::OpNil => self.push(Value::Nil),
 
                 Instruction::OpConstant(val_offset) => {
                     let val = self.chunk.get_constant(val_offset);
                     self.push(val);
                 }
 
-                Instruction::OpInvalid => return Err(InterpretError::RuntimeError),
+                Instruction::OpInvalid => return Err(InterpretError::InternalError),
             }
         }
         Ok(())
+    }
+
+    fn exec_binary_op(&mut self, instr: Instruction) -> Result<(), InterpretError> {
+	let rhs = self.get_number()?;
+	let lhs = self.get_number()?;
+
+	let result = match instr {
+	    Instruction::OpAdd => lhs + rhs,
+	    Instruction::OpSubtract => lhs - rhs,
+	    Instruction::OpMultiply => lhs * rhs,
+	    Instruction::OpDivide => lhs / rhs,
+	    _ => { return Err(InterpretError::InternalError); }
+	};
+
+	let result = Value::Double(result);
+	self.push(result);
+	Ok(())
     }
 
     fn push(&mut self, val: Value) {
@@ -87,7 +96,7 @@ impl<'a> Vm<'a> {
         if let Some(val) = self.stack.pop() {
             Ok(val)
         } else {
-            Err(InterpretError::RuntimeError)
+            Err(InterpretError::InternalError)
         }
     }
 }

@@ -14,10 +14,10 @@ impl<'a> Disassembler<'a> {
     }
 
     fn get_line(&self, instr_index: usize) -> String {
-        if instr_index > 0 && self.chunk.lines[instr_index] == self.chunk.lines[instr_index - 1] {
+        if instr_index > 0 && self.chunk.get_line(instr_index) == self.chunk.get_line(instr_index - 1) {
             format!("{:>4} ", "|")
         } else {
-            format!("{:04} ", self.chunk.lines[instr_index])
+            format!("{:04} ", self.chunk.get_line(instr_index))
         }
     }
 }
@@ -44,6 +44,9 @@ impl<'a> Iterator for Disassembler<'a> {
                 Instruction::OpSubtract => result.push_str("OP_SUBTRACT"),
                 Instruction::OpMultiply => result.push_str("OP_MULTIPLY"),
                 Instruction::OpDivide => result.push_str("OP_DIVIDE"),
+                Instruction::OpTrue => result.push_str("OP_TRUE"),
+                Instruction::OpFalse => result.push_str("OP_FALSE"),
+                Instruction::OpNil => result.push_str("OP_NIL"),
                 Instruction::OpReturn => result.push_str("OP_RETURN"),
                 Instruction::OpInvalid => result.push_str("OP_INVALID"),
             }

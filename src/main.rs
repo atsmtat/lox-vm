@@ -9,9 +9,11 @@ use std::io::{self, BufRead, Write};
 
 fn interpret(source: &str) {
     let mut chunk = chunk::Chunk::new();
-    compiler::compile(&source, &mut chunk);
-    let mut vm = vm::Vm::new(&chunk);
-    vm.run();
+    let result = compiler::compile(&source, &mut chunk);
+    if result.is_ok() {
+	let mut vm = vm::Vm::new(&chunk);
+	vm.run();
+    }
 }
 
 fn run_repl() {
@@ -27,7 +29,7 @@ fn run_repl() {
     }
 }
 
-fn run_file(path: &str) {}
+fn run_file(_: &str) {}
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();

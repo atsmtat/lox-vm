@@ -138,6 +138,16 @@ impl<'a> Parser<'a> {
 	}
     }
 
+    fn literal(&mut self, tok: Token<'a>) {
+	match tok.kind {
+	    TokenKind::True => { self.chunk.add_instruction(Instruction::OpTrue, tok.line); }
+	    TokenKind::False => { self.chunk.add_instruction(Instruction::OpFalse, tok.line); }
+	    TokenKind::Nil => { self.chunk.add_instruction(Instruction::OpNil, tok.line); }
+	    _ => { self.report_error(tok.line, "invalid literal"); }
+	    
+	}
+    }
+
     fn grouping(&mut self, _: Token<'a>) {
 	self.expression();
 	self.consume(TokenKind::RightParen);
@@ -197,6 +207,9 @@ impl<'a> Parser<'a> {
 	match tok_kind {
 	    TokenKind::LeftParen => Some(Self::grouping),
 	    TokenKind::Number => Some(Self::number),
+	    TokenKind::True => Some(Self::literal),
+	    TokenKind::False => Some(Self::literal),
+	    TokenKind::Nil => Some(Self::literal),
 	    TokenKind::Minus => Some(Self::unary),
 	    _ => None,
 	}
