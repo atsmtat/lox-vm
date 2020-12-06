@@ -1,3 +1,5 @@
+use crate::value::Value;
+
 const OP_CONSTANT: u8 = 1;
 const OP_RETURN: u8 = 2;
 const OP_NEGATE: u8 = 3;
@@ -8,6 +10,10 @@ const OP_DIVIDE: u8 = 7;
 const OP_TRUE: u8 = 8;
 const OP_FALSE: u8 = 9;
 const OP_NIL: u8 = 10;
+const OP_NOT: u8 = 11;
+const OP_EQUAL: u8 = 12;
+const OP_GREATER: u8 = 13;
+const OP_LESS: u8 = 14;
 
 const OP_INVALID: u8 = u8::MAX;
 
@@ -21,6 +27,10 @@ pub enum Instruction {
     OpTrue,
     OpFalse,
     OpNil,
+    OpNot,
+    OpEqual,
+    OpGreater,
+    OpLess,
     OpReturn,
     OpInvalid,
 }
@@ -38,16 +48,13 @@ impl From<Instruction> for Vec<u8> {
             Instruction::OpTrue => vec![OP_TRUE],
             Instruction::OpFalse => vec![OP_FALSE],
             Instruction::OpNil => vec![OP_NIL],
+            Instruction::OpNot => vec![OP_NOT],
+            Instruction::OpEqual => vec![OP_EQUAL],
+            Instruction::OpGreater => vec![OP_GREATER],
+            Instruction::OpLess => vec![OP_LESS],
             Instruction::OpInvalid => vec![OP_INVALID],
         }
     }
-}
-
-#[derive(Clone, Copy, Debug)]
-pub enum Value {
-    Boolean(bool),
-    Double(f64),
-    Nil,
 }
 
 pub struct Chunk {
@@ -141,6 +148,10 @@ impl<'a> Iterator for InstructionIter<'a> {
             OP_TRUE => Instruction::OpTrue,
             OP_FALSE => Instruction::OpFalse,
             OP_NIL => Instruction::OpNil,
+            OP_NOT => Instruction::OpNot,
+            OP_EQUAL => Instruction::OpEqual,
+            OP_GREATER => Instruction::OpGreater,
+            OP_LESS => Instruction::OpLess,
             OP_RETURN => Instruction::OpReturn,
             _ => Instruction::OpInvalid,
         };

@@ -1,5 +1,6 @@
 use std::collections::HashMap;
-use crate::chunk::{Chunk, Instruction, Value};
+use crate::value::Value;
+use crate::chunk::{Chunk, Instruction};
 use crate::debug;
 use crate::scanner::{Scanner, Token, TokenKind, ScannerError};
 use crate::error::InterpretError;
@@ -157,6 +158,7 @@ impl<'a> Parser<'a> {
 	self.parse_precedence(Precedence::Unary as i32);
 	match tok.kind {
 	    TokenKind::Minus =>{ self.chunk.add_instruction(Instruction::OpNegate, tok.line); }
+	    TokenKind::Bang =>{ self.chunk.add_instruction(Instruction::OpNot, tok.line); }
 	    _ => { self.report_error(tok.line, "invalid prefix operator"); }
 	}
     }
@@ -166,10 +168,25 @@ impl<'a> Parser<'a> {
 	self.parse_precedence(my_prec as i32 + 1);
 
 	match tok.kind {
-	    TokenKind::Plus =>{ self.chunk.add_instruction(Instruction::OpAdd, tok.line); }
-	    TokenKind::Minus =>{ self.chunk.add_instruction(Instruction::OpSubtract, tok.line); }
-	    TokenKind::Star =>{ self.chunk.add_instruction(Instruction::OpMultiply, tok.line); }
-	    TokenKind::Slash =>{ self.chunk.add_instruction(Instruction::OpDivide, tok.line); }
+	    TokenKind::Plus => self.chunk.add_instruction(Instruction::OpAdd, tok.line),
+	    TokenKind::Minus => self.chunk.add_instruction(Instruction::OpSubtract, tok.line),
+	    TokenKind::Star => self.chunk.add_instruction(Instruction::OpMultiply, tok.line),
+	    TokenKind::Slash => self.chunk.add_instruction(Instruction::OpDivide, tok.line),
+	    TokenKind::BangEqual => {
+		self.chunk.add_instruction(Instruction::OpEqual, tok.line);
+		self.chunk.add_instruction(Instruction::OpNot, tok.line);
+	    }
+	    TokenKind::EqualEqual => self.chunk.add_instruction(Instruction::OpEqual, tok.line),
+	    TokenKind::Greater => self.chunk.add_instruction(Instruction::OpGreater, tok.line),
+	    TokenKind::GreaterEqual => {
+		self.chunk.add_instruction(Instruction::OpLess, tok.line);
+		self.chunk.add_instruction(Instruction::OpNot, tok.line);
+	    }
+	    TokenKind::Less => self.chunk.add_instruction(Instruction::OpLess, tok.line),
+	    TokenKind::LessEqual => {
+		self.chunk.add_instruction(Instruction::OpGreater, tok.line);
+		self.chunk.add_instruction(Instruction::OpNot, tok.line);
+	    }
 	    _ => { self.report_error(tok.line, "invalid binary operator"); }
 	}
 	
@@ -211,6 +228,7 @@ impl<'a> Parser<'a> {
 	    TokenKind::False => Some(Self::literal),
 	    TokenKind::Nil => Some(Self::literal),
 	    TokenKind::Minus => Some(Self::unary),
+	    TokenKind::Bang => Some(Self::unary),
 	    _ => None,
 	}
     }
@@ -221,6 +239,12 @@ impl<'a> Parser<'a> {
 	    TokenKind::Plus => Precedence::Term,
 	    TokenKind::Star => Precedence::Factor,
 	    TokenKind::Slash => Precedence::Factor,
+	    TokenKind::BangEqual => Precedence::Equality,
+	    TokenKind::EqualEqual => Precedence::Equality,
+	    TokenKind::Greater => Precedence::Comparison,
+	    TokenKind::GreaterEqual => Precedence::Comparison,
+	    TokenKind::Less => Precedence::Comparison,
+	    TokenKind::LessEqual => Precedence::Comparison,
 	    _ => Precedence::None,
 	}
     }
@@ -231,6 +255,12 @@ impl<'a> Parser<'a> {
 	    TokenKind::Plus => Some(Self::binary),
 	    TokenKind::Star => Some(Self::binary),
 	    TokenKind::Slash => Some(Self::binary),
+	    TokenKind::BangEqual => Some(Self::binary),
+	    TokenKind::EqualEqual => Some(Self::binary),
+	    TokenKind::Greater => Some(Self::binary),
+	    TokenKind::GreaterEqual => Some(Self::binary),
+	    TokenKind::Less => Some(Self::binary),
+	    TokenKind::LessEqual => Some(Self::binary),
 	    _ => None
 	}
     }

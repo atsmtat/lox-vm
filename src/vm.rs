@@ -1,4 +1,5 @@
-use crate::chunk::{Chunk, Instruction, Value};
+use crate::value::Value;
+use crate::chunk::{Chunk, Instruction};
 use crate::error::InterpretError;
 
 const STACK_MAX: usize = 256;
@@ -49,11 +50,59 @@ impl<'a> Vm<'a> {
                     self.push(result);
                 }
 
-		Instruction::OpAdd |
-		Instruction::OpSubtract |
-		Instruction::OpMultiply |
+                Instruction::OpNot => {
+                    let val = self.pop()?;
+                    let result = Value::Boolean(val.is_falsey());
+                    self.push(result);
+                }
+
+		Instruction::OpAdd => {
+		    let rhs = self.pop()?;
+		    let lhs = self.pop()?;
+		    let result = lhs + rhs;
+		    self.push(result?);
+		}
+
+		Instruction::OpSubtract => {
+		    let rhs = self.pop()?;
+		    let lhs = self.pop()?;
+		    let result = lhs - rhs;
+		    self.push(result?);
+		}
+
+		Instruction::OpMultiply => {
+		    let rhs = self.pop()?;
+		    let lhs = self.pop()?;
+		    let result = lhs * rhs;
+		    self.push(result?);
+		}
+
 		Instruction::OpDivide => {
-		    self.exec_binary_op(instr)?;
+		    let rhs = self.pop()?;
+		    let lhs = self.pop()?;
+		    let result = lhs / rhs;
+		    self.push(result?);
+		}
+
+		Instruction::OpEqual => {
+		    let rhs = self.pop()?;
+		    let lhs = self.pop()?;
+		    let result = Value::Boolean(lhs == rhs);
+		    self.push(result);
+		}
+
+		Instruction::OpGreater => {
+		    let rhs = self.pop()?;
+		    let lhs = self.pop()?;
+		    let result = lhs.gt(&rhs);
+		    self.push(result?);
+		}
+
+		Instruction::OpLess => {
+		    let rhs = self.pop()?;
+		    let lhs = self.pop()?;
+		    let result = lhs.lt(&rhs);
+		    self.push(result?);
 		}
 
 		Instruction::OpTrue => self.push(Value::Boolean(true)),
@@ -69,23 +118,6 @@ impl<'a> Vm<'a> {
             }
         }
         Ok(())
-    }
-
-    fn exec_binary_op(&mut self, instr: Instruction) -> Result<(), InterpretError> {
-	let rhs = self.get_number()?;
-	let lhs = self.get_number()?;
-
-	let result = match instr {
-	    Instruction::OpAdd => lhs + rhs,
-	    Instruction::OpSubtract => lhs - rhs,
-	    Instruction::OpMultiply => lhs * rhs,
-	    Instruction::OpDivide => lhs / rhs,
-	    _ => { return Err(InterpretError::InternalError); }
-	};
-
-	let result = Value::Double(result);
-	self.push(result);
-	Ok(())
     }
 
     fn push(&mut self, val: Value) {

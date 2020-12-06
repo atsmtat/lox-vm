@@ -1,3 +1,4 @@
+mod value;
 mod chunk;
 mod compiler;
 mod debug;

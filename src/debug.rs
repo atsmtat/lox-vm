@@ -47,6 +47,10 @@ impl<'a> Iterator for Disassembler<'a> {
                 Instruction::OpTrue => result.push_str("OP_TRUE"),
                 Instruction::OpFalse => result.push_str("OP_FALSE"),
                 Instruction::OpNil => result.push_str("OP_NIL"),
+                Instruction::OpNot => result.push_str("OP_NOT"),
+                Instruction::OpEqual => result.push_str("OP_EQUAL"),
+                Instruction::OpGreater => result.push_str("OP_GREATER"),
+                Instruction::OpLess => result.push_str("OP_LESS"),
                 Instruction::OpReturn => result.push_str("OP_RETURN"),
                 Instruction::OpInvalid => result.push_str("OP_INVALID"),
             }
