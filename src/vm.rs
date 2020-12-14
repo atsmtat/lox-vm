@@ -1,3 +1,4 @@
+use crate::memory::Heap;
 use crate::value::Value;
 use crate::chunk::{Chunk, Instruction};
 use crate::error::InterpretError;
@@ -7,7 +8,8 @@ const STACK_MAX: usize = 256;
 pub struct Vm<'a> {
     chunk: &'a Chunk,
     stack: Vec<Value>,
-    ip : usize,
+    ip: usize,
+    heap: Heap,
 }
 
 impl<'a> Vm<'a> {
@@ -16,6 +18,7 @@ impl<'a> Vm<'a> {
             chunk,
             stack: Vec::with_capacity(STACK_MAX),
 	    ip: 0,
+	    heap: Heap::new(),
         }
     }
 

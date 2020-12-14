@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use crate::value::Value;
 use crate::chunk::{Chunk, Instruction};
 use crate::debug;

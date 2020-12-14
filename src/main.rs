@@ -1,3 +1,4 @@
+mod memory;
 mod value;
 mod chunk;
 mod compiler;

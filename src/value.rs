@@ -1,5 +1,6 @@
 use std::ops::{Add, Sub, Mul, Div};
 use std::cmp::{PartialEq, PartialOrd, Ordering};
+use crate::memory::{Gc, StrObj};
 use crate::error::InterpretError;
 
 #[derive(Clone, Copy, Debug)]
@@ -7,6 +8,7 @@ pub enum Value {
     Boolean(bool),
     Double(f64),
     Nil,
+    String(Gc<StrObj>),
 }
 
 impl Value {
@@ -135,6 +137,7 @@ impl PartialEq for Value {
 		    _ => false,
 		}
 	    }
+	    Value::String(_) => true, // TODO
 	}
     }
 }
