@@ -93,7 +93,7 @@ impl Chunk {
     }
 
     pub fn get_line(&self, index: usize) -> u32 {
-	self.lines[index]
+        self.lines[index]
     }
 
     pub fn iter(&self) -> InstructionIter {

@@ -1,10 +1,10 @@
-mod memory;
-mod value;
 mod chunk;
 mod compiler;
 mod debug;
 mod error;
+mod memory;
 mod scanner;
+mod value;
 mod vm;
 
 use std::io::{self, BufRead, Write};
@@ -13,8 +13,8 @@ fn interpret(source: &str) {
     let mut chunk = chunk::Chunk::new();
     let result = compiler::compile(&source, &mut chunk);
     if result.is_ok() {
-	let mut vm = vm::Vm::new(&chunk);
-	vm.run();
+        let mut vm = vm::Vm::new(&chunk);
+        vm.run();
     }
 }
 
