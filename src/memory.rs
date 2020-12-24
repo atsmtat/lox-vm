@@ -27,6 +27,51 @@ impl Heap {
         }
         Gc { ptr: gc_box }
     }
+
+    pub fn sweep(&mut self) {
+        let mut next_box = &self.head;
+        let mut tail_ptr;
+        match self.head {
+            Some(curr_head) => {
+                tail_ptr = curr_head;
+                unsafe { next_box = &(*curr_head.as_ptr()).header.next }
+            }
+            None => {
+                return;
+            } // empty list
+        }
+        let head_p = tail_ptr;
+
+        while let Some(gc_box) = next_box {
+            unsafe {
+                next_box = &(*gc_box.as_ptr()).header.next;
+                if !(*gc_box.as_ptr()).header.marked {
+                    // unmarked, so let it drop by giving ownership to a Box
+                    let owning_box = Box::from_raw(gc_box.as_ptr());
+                    (*tail_ptr.as_ptr()).header.next = *next_box;
+                } else {
+                    // reset the mark
+                    (*gc_box.as_ptr()).header.marked = false;
+                    tail_ptr = *gc_box;
+                }
+            }
+        }
+
+        unsafe {
+            if !(*head_p.as_ptr()).header.marked {
+                // head is unmarked too, so drop it the same way
+                let owning_box = Box::from_raw(head_p.as_ptr());
+                self.head = owning_box.header.next;
+            }
+        }
+    }
+}
+
+impl Drop for Heap {
+    fn drop(&mut self) {
+        println!("destroying the heap");
+        self.sweep();
+    }
 }
 
 #[derive(Debug)]
@@ -72,6 +117,6 @@ impl<T: Object + ?Sized> GcBox<T> {
 }
 
 #[derive(Debug)]
-pub struct StrObj(String);
+pub struct StrObj(pub String);
 
 impl Object for StrObj {}

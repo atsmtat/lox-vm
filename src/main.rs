@@ -11,9 +11,10 @@ use std::io::{self, BufRead, Write};
 
 fn interpret(source: &str) {
     let mut chunk = chunk::Chunk::new();
-    let result = compiler::compile(&source, &mut chunk);
+    let mut heap = memory::Heap::new();
+    let result = compiler::compile(&source, &mut chunk, &mut heap);
     if result.is_ok() {
-        let mut vm = vm::Vm::new(&chunk);
+        let mut vm = vm::Vm::new(&chunk, &heap);
         vm.run();
     }
 }

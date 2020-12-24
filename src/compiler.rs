@@ -1,12 +1,13 @@
 use crate::chunk::{Chunk, Instruction};
 use crate::debug;
 use crate::error::InterpretError;
+use crate::memory::{Heap, StrObj};
 use crate::scanner::{Scanner, ScannerError, Token, TokenKind};
 use crate::value::Value;
 
-pub fn compile(source: &str, chunk: &mut Chunk) -> Result<(), InterpretError> {
+pub fn compile(source: &str, chunk: &mut Chunk, heap: &mut Heap) -> Result<(), InterpretError> {
     let scanner = Scanner::new(source);
-    let mut parser = Parser::new(scanner, chunk);
+    let mut parser = Parser::new(scanner, chunk, heap);
     parser.parse();
     if parser.had_error {
         Err(InterpretError::CompileError)
@@ -21,6 +22,7 @@ pub fn compile(source: &str, chunk: &mut Chunk) -> Result<(), InterpretError> {
 struct Parser<'a> {
     scanner: std::iter::Peekable<Scanner<'a>>,
     chunk: &'a mut Chunk,
+    heap: &'a mut Heap,
     pub had_error: bool,
     panic_mode: bool,
     curr_line: u32,
@@ -42,10 +44,11 @@ enum Precedence {
 }
 
 impl<'a> Parser<'a> {
-    pub fn new(scanner: Scanner<'a>, chunk: &'a mut Chunk) -> Self {
+    pub fn new(scanner: Scanner<'a>, chunk: &'a mut Chunk, heap: &'a mut Heap) -> Self {
         Parser {
             scanner: scanner.peekable(),
             chunk,
+            heap,
             had_error: false,
             panic_mode: false,
             curr_line: 0,
@@ -133,16 +136,28 @@ impl<'a> Parser<'a> {
         self.parse_precedence(Precedence::Assignment as i32)
     }
 
-    fn number(&mut self, tok: Token<'a>) {
-        let val = tok.lexeme.parse::<f64>().unwrap();
-        let const_ix = self.chunk.add_constant(Value::Double(val));
-        let line = tok.line;
+    fn add_constant(&mut self, val: Value, line: u32) {
+        let const_ix = self.chunk.add_constant(val);
         if const_ix == u8::MAX - 1 {
             self.report_error(line, "too many constants in one chunk");
         } else {
             self.chunk
                 .add_instruction(Instruction::OpConstant(const_ix), line);
         }
+    }
+
+    fn number(&mut self, tok: Token<'a>) {
+        let val = tok.lexeme.parse::<f64>().unwrap();
+        self.add_constant(Value::Double(val), tok.line);
+    }
+
+    fn string(&mut self, tok: Token<'a>) {
+        // trim enclosing '"' from the input string
+        let string_lit = tok.lexeme.trim_matches('"').to_string();
+
+        // allocate gc string object on the heap
+        let str_obj = self.heap.allocate(StrObj(string_lit));
+        self.add_constant(Value::String(str_obj), tok.line);
     }
 
     fn literal(&mut self, tok: Token<'a>) {
@@ -248,6 +263,7 @@ impl<'a> Parser<'a> {
         match tok_kind {
             TokenKind::LeftParen => Some(Self::grouping),
             TokenKind::Number => Some(Self::number),
+            TokenKind::String => Some(Self::string),
             TokenKind::True => Some(Self::literal),
             TokenKind::False => Some(Self::literal),
             TokenKind::Nil => Some(Self::literal),

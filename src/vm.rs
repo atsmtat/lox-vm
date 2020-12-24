@@ -9,16 +9,16 @@ pub struct Vm<'a> {
     chunk: &'a Chunk,
     stack: Vec<Value>,
     ip: usize,
-    heap: Heap,
+    heap: &'a Heap,
 }
 
 impl<'a> Vm<'a> {
-    pub fn new(chunk: &'a Chunk) -> Self {
+    pub fn new(chunk: &'a Chunk, heap: &'a Heap) -> Self {
         Vm {
             chunk,
             stack: Vec::with_capacity(STACK_MAX),
             ip: 0,
-            heap: Heap::new(),
+            heap: heap,
         }
     }
 
