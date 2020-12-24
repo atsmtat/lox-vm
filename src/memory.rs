@@ -1,3 +1,5 @@
+use std::fmt;
+use std::ops::Deref;
 use std::ptr::NonNull;
 
 pub trait Object {}
@@ -62,6 +64,9 @@ impl Heap {
                 // head is unmarked too, so drop it the same way
                 let owning_box = Box::from_raw(head_p.as_ptr());
                 self.head = owning_box.header.next;
+            } else {
+                // reset the mark
+                (*head_p.as_ptr()).header.marked = false;
             }
         }
     }
@@ -74,7 +79,6 @@ impl Drop for Heap {
     }
 }
 
-#[derive(Debug)]
 pub struct Gc<T: Object + 'static> {
     ptr: NonNull<GcBox<T>>,
 }
@@ -84,6 +88,19 @@ impl<T: Object> Copy for Gc<T> {}
 impl<T: Object> Clone for Gc<T> {
     fn clone(&self) -> Self {
         *self
+    }
+}
+
+impl<T: Object> Deref for Gc<T> {
+    type Target = T;
+    fn deref(&self) -> &T {
+        unsafe { (*self.ptr.as_ptr()).value() }
+    }
+}
+
+impl<T: Object + fmt::Debug> fmt::Debug for Gc<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_fmt(format_args!("{:?}", self.deref()))
     }
 }
 
