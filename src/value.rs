@@ -114,7 +114,10 @@ impl PartialEq for Value {
                 Value::Nil => true,
                 _ => false,
             },
-            Value::String(_) => true, // TODO
+            Value::String(lstr) => match rhs {
+                Value::String(rstr) => *lstr.0 == *rstr.0,
+                _ => false,
+            },
         }
     }
 }

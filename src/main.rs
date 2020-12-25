@@ -14,7 +14,7 @@ fn interpret(source: &str) {
     let mut heap = memory::Heap::new();
     let result = compiler::compile(&source, &mut chunk, &mut heap);
     if result.is_ok() {
-        let mut vm = vm::Vm::new(&chunk, &heap);
+        let mut vm = vm::Vm::new(&chunk, &mut heap);
         vm.run();
     }
 }

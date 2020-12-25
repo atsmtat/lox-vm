@@ -31,7 +31,7 @@ impl Heap {
     }
 
     pub fn sweep(&mut self) {
-        let mut next_box = &self.head;
+        let mut next_box;
         let mut tail_ptr;
         match self.head {
             Some(curr_head) => {
@@ -49,7 +49,7 @@ impl Heap {
                 next_box = &(*gc_box.as_ptr()).header.next;
                 if !(*gc_box.as_ptr()).header.marked {
                     // unmarked, so let it drop by giving ownership to a Box
-                    let owning_box = Box::from_raw(gc_box.as_ptr());
+                    let _owning_box = Box::from_raw(gc_box.as_ptr());
                     (*tail_ptr.as_ptr()).header.next = *next_box;
                 } else {
                     // reset the mark

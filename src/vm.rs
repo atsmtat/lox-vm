@@ -1,6 +1,6 @@
 use crate::chunk::{Chunk, Instruction};
 use crate::error::InterpretError;
-use crate::memory::Heap;
+use crate::memory::{Gc, Heap, StrObj};
 use crate::value::Value;
 
 const STACK_MAX: usize = 256;
@@ -9,11 +9,11 @@ pub struct Vm<'a> {
     chunk: &'a Chunk,
     stack: Vec<Value>,
     ip: usize,
-    heap: &'a Heap,
+    heap: &'a mut Heap,
 }
 
 impl<'a> Vm<'a> {
-    pub fn new(chunk: &'a Chunk, heap: &'a Heap) -> Self {
+    pub fn new(chunk: &'a Chunk, heap: &'a mut Heap) -> Self {
         Vm {
             chunk,
             stack: Vec::with_capacity(STACK_MAX),
@@ -62,7 +62,13 @@ impl<'a> Vm<'a> {
                 Instruction::OpAdd => {
                     let rhs = self.pop()?;
                     let lhs = self.pop()?;
-                    let result = lhs + rhs;
+                    let result = match lhs {
+                        Value::String(lstr) => match rhs {
+                            Value::String(rstr) => Ok(self.concatenate(lstr, rstr)),
+                            _ => lhs + rhs,
+                        },
+                        _ => lhs + rhs,
+                    };
                     self.push(result?);
                 }
 
@@ -133,5 +139,11 @@ impl<'a> Vm<'a> {
         } else {
             Err(InterpretError::InternalError)
         }
+    }
+
+    fn concatenate(&mut self, lstr: Gc<StrObj>, rstr: Gc<StrObj>) -> Value {
+        let mut new_str = String::from(&lstr.0);
+        new_str.push_str(&rstr.0);
+        Value::String(self.heap.allocate(StrObj(new_str)))
     }
 }
