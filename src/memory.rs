@@ -1,4 +1,7 @@
+use fnv::FnvHashMap;
+use std::cmp::PartialEq;
 use std::fmt;
+use std::hash::{BuildHasher, Hash, Hasher};
 use std::ops::Deref;
 use std::ptr::NonNull;
 
@@ -6,11 +9,15 @@ pub trait Object {}
 
 pub struct Heap {
     head: Option<NonNull<GcBox<dyn Object>>>,
+    interned_str: FnvHashMap<u64, Gc<StrObj>>,
 }
 
 impl Heap {
     pub fn new() -> Self {
-        Heap { head: None }
+        Heap {
+            head: None,
+            interned_str: FnvHashMap::default(),
+        }
     }
 
     pub fn allocate<T: Object>(&mut self, val: T) -> Gc<T> {
@@ -28,6 +35,19 @@ impl Heap {
             }
         }
         Gc { ptr: gc_box }
+    }
+
+    pub fn allocate_string(&mut self, val: String) -> Gc<StrObj> {
+        let mut hasher = self.interned_str.hasher().build_hasher();
+        val.hash(&mut hasher);
+        let key = hasher.finish();
+
+        if let Some(gc_str) = self.interned_str.get(&key) {
+            return gc_str.clone();
+        }
+        let new_str = self.allocate(StrObj(val));
+        self.interned_str.insert(key, new_str);
+        new_str
     }
 
     pub fn sweep(&mut self) {
@@ -137,3 +157,11 @@ impl<T: Object + ?Sized> GcBox<T> {
 pub struct StrObj(pub String);
 
 impl Object for StrObj {}
+
+// Since all strings are interned, string equality is same as StrObj box pointer
+// equality.
+impl PartialEq for Gc<StrObj> {
+    fn eq(&self, other: &Gc<StrObj>) -> bool {
+        self.ptr == other.ptr
+    }
+}

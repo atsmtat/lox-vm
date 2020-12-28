@@ -1,7 +1,7 @@
 use crate::chunk::{Chunk, Instruction};
 use crate::debug;
 use crate::error::InterpretError;
-use crate::memory::{Heap, StrObj};
+use crate::memory::Heap;
 use crate::scanner::{Scanner, ScannerError, Token, TokenKind};
 use crate::value::Value;
 
@@ -156,7 +156,7 @@ impl<'a> Parser<'a> {
         let string_lit = tok.lexeme.trim_matches('"').to_string();
 
         // allocate gc string object on the heap
-        let str_obj = self.heap.allocate(StrObj(string_lit));
+        let str_obj = self.heap.allocate_string(string_lit);
         self.add_constant(Value::String(str_obj), tok.line);
     }
 

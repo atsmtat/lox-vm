@@ -144,6 +144,6 @@ impl<'a> Vm<'a> {
     fn concatenate(&mut self, lstr: Gc<StrObj>, rstr: Gc<StrObj>) -> Value {
         let mut new_str = String::from(&lstr.0);
         new_str.push_str(&rstr.0);
-        Value::String(self.heap.allocate(StrObj(new_str)))
+        Value::String(self.heap.allocate_string(new_str))
     }
 }
