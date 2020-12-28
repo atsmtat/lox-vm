@@ -1,5 +1,6 @@
-use fnv::FnvHashMap;
-use std::cmp::PartialEq;
+use fnv::FnvHashSet;
+use std::borrow::Borrow;
+use std::cmp::{Eq, PartialEq};
 use std::fmt;
 use std::hash::{BuildHasher, Hash, Hasher};
 use std::ops::Deref;
@@ -9,14 +10,14 @@ pub trait Object {}
 
 pub struct Heap {
     head: Option<NonNull<GcBox<dyn Object>>>,
-    interned_str: FnvHashMap<u64, Gc<StrObj>>,
+    interned_str: FnvHashSet<Gc<StrObj>>,
 }
 
 impl Heap {
     pub fn new() -> Self {
         Heap {
             head: None,
-            interned_str: FnvHashMap::default(),
+            interned_str: FnvHashSet::default(),
         }
     }
 
@@ -38,15 +39,11 @@ impl Heap {
     }
 
     pub fn allocate_string(&mut self, val: String) -> Gc<StrObj> {
-        let mut hasher = self.interned_str.hasher().build_hasher();
-        val.hash(&mut hasher);
-        let key = hasher.finish();
-
-        if let Some(gc_str) = self.interned_str.get(&key) {
+        if let Some(gc_str) = self.interned_str.get(&val) {
             return gc_str.clone();
         }
         let new_str = self.allocate(StrObj(val));
-        self.interned_str.insert(key, new_str);
+        self.interned_str.insert(new_str);
         new_str
     }
 
@@ -163,5 +160,19 @@ impl Object for StrObj {}
 impl PartialEq for Gc<StrObj> {
     fn eq(&self, other: &Gc<StrObj>) -> bool {
         self.ptr == other.ptr
+    }
+}
+
+impl Eq for Gc<StrObj> {}
+
+impl Hash for Gc<StrObj> {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.0.hash(state);
+    }
+}
+
+impl Borrow<String> for Gc<StrObj> {
+    fn borrow(&self) -> &String {
+        &self.0
     }
 }
