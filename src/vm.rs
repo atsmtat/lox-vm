@@ -42,9 +42,15 @@ impl<'a> Vm<'a> {
             self.ip = instr_index;
             match instr {
                 Instruction::OpReturn => {
-                    let val = self.pop()?;
-                    println!("'{:?}'", val);
                     return Ok(());
+                }
+
+                Instruction::OpPop => {
+                    self.pop()?;
+                }
+
+                Instruction::OpPrint => {
+                    println!("{}", self.pop()?);
                 }
 
                 Instruction::OpNegate => {

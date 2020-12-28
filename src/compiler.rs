@@ -56,7 +56,7 @@ impl<'a> Parser<'a> {
     }
 
     pub fn parse(&mut self) {
-        self.expression();
+        self.program();
         if !self.had_error {
             self.chunk
                 .add_instruction(Instruction::OpReturn, self.curr_line);
@@ -130,6 +130,49 @@ impl<'a> Parser<'a> {
 
         // to be reset at the next synchronization point
         self.panic_mode = true;
+    }
+
+    fn is_eof(&mut self) -> bool {
+        self.scanner.peek().is_none()
+    }
+
+    fn program(&mut self) {
+        while !self.is_eof() {
+            self.declaration();
+        }
+    }
+
+    fn declaration(&mut self) {
+        self.statement();
+    }
+
+    fn statement(&mut self) {
+        match self.peek() {
+            Some(tok) => match tok.kind {
+                TokenKind::Print => {
+                    self.advance();
+                    self.print_statement();
+                }
+                _ => {
+                    self.expr_statement();
+                }
+            },
+            None => {}
+        }
+    }
+
+    fn print_statement(&mut self) {
+        self.expression();
+        self.consume(TokenKind::Semicolon);
+        self.chunk
+            .add_instruction(Instruction::OpPrint, self.curr_line);
+    }
+
+    fn expr_statement(&mut self) {
+        self.expression();
+        self.consume(TokenKind::Semicolon);
+        self.chunk
+            .add_instruction(Instruction::OpPop, self.curr_line);
     }
 
     fn expression(&mut self) {

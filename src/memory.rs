@@ -91,7 +91,6 @@ impl Heap {
 
 impl Drop for Heap {
     fn drop(&mut self) {
-        println!("destroying the heap");
         self.sweep();
     }
 }

@@ -14,6 +14,8 @@ const OP_NOT: u8 = 11;
 const OP_EQUAL: u8 = 12;
 const OP_GREATER: u8 = 13;
 const OP_LESS: u8 = 14;
+const OP_PRINT: u8 = 15;
+const OP_POP: u8 = 16;
 
 const OP_INVALID: u8 = u8::MAX;
 
@@ -31,6 +33,8 @@ pub enum Instruction {
     OpEqual,
     OpGreater,
     OpLess,
+    OpPrint,
+    OpPop,
     OpReturn,
     OpInvalid,
 }
@@ -52,6 +56,8 @@ impl From<Instruction> for Vec<u8> {
             Instruction::OpEqual => vec![OP_EQUAL],
             Instruction::OpGreater => vec![OP_GREATER],
             Instruction::OpLess => vec![OP_LESS],
+            Instruction::OpPrint => vec![OP_PRINT],
+            Instruction::OpPop => vec![OP_POP],
             Instruction::OpInvalid => vec![OP_INVALID],
         }
     }
@@ -152,6 +158,8 @@ impl<'a> Iterator for InstructionIter<'a> {
             OP_EQUAL => Instruction::OpEqual,
             OP_GREATER => Instruction::OpGreater,
             OP_LESS => Instruction::OpLess,
+            OP_PRINT => Instruction::OpPrint,
+            OP_POP => Instruction::OpPop,
             OP_RETURN => Instruction::OpReturn,
             _ => Instruction::OpInvalid,
         };

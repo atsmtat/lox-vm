@@ -14,7 +14,9 @@ impl<'a> Disassembler<'a> {
     }
 
     fn get_line(&self, instr_index: usize) -> String {
-        if instr_index > 0 && self.chunk.get_line(instr_index) == self.chunk.get_line(instr_index - 1) {
+        if instr_index > 0
+            && self.chunk.get_line(instr_index) == self.chunk.get_line(instr_index - 1)
+        {
             format!("{:>4} ", "|")
         } else {
             format!("{:04} ", self.chunk.get_line(instr_index))
@@ -51,6 +53,8 @@ impl<'a> Iterator for Disassembler<'a> {
                 Instruction::OpEqual => result.push_str("OP_EQUAL"),
                 Instruction::OpGreater => result.push_str("OP_GREATER"),
                 Instruction::OpLess => result.push_str("OP_LESS"),
+                Instruction::OpPrint => result.push_str("OP_PRINT"),
+                Instruction::OpPop => result.push_str("OP_POP"),
                 Instruction::OpReturn => result.push_str("OP_RETURN"),
                 Instruction::OpInvalid => result.push_str("OP_INVALID"),
             }

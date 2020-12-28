@@ -1,6 +1,7 @@
 use crate::error::InterpretError;
 use crate::memory::{Gc, StrObj};
 use std::cmp::{Ordering, PartialEq, PartialOrd};
+use std::fmt;
 use std::ops::{Add, Div, Mul, Sub};
 
 #[derive(Clone, Copy, Debug)]
@@ -39,6 +40,17 @@ impl Value {
             }
         } else {
             Err(InterpretError::InvalidOpError)
+        }
+    }
+}
+
+impl fmt::Display for Value {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Value::Boolean(val) => f.write_fmt(format_args!("{}", val)),
+            Value::Double(val) => f.write_fmt(format_args!("{}", val)),
+            Value::Nil => f.write_str("nil"),
+            Value::String(gc_str) => f.write_str(&gc_str.0),
         }
     }
 }
