@@ -2,6 +2,7 @@ use crate::chunk::{Chunk, Instruction};
 use crate::error::InterpretError;
 use crate::memory::{Gc, Heap, StrObj};
 use crate::value::Value;
+use fnv::FnvHashMap;
 
 const STACK_MAX: usize = 256;
 
@@ -10,6 +11,7 @@ pub struct Vm<'a> {
     stack: Vec<Value>,
     ip: usize,
     heap: &'a mut Heap,
+    globals: FnvHashMap<Gc<StrObj>, Value>,
 }
 
 impl<'a> Vm<'a> {
@@ -19,6 +21,7 @@ impl<'a> Vm<'a> {
             stack: Vec::with_capacity(STACK_MAX),
             ip: 0,
             heap: heap,
+            globals: FnvHashMap::default(),
         }
     }
 
@@ -127,6 +130,19 @@ impl<'a> Vm<'a> {
                 Instruction::OpConstant(val_offset) => {
                     let val = self.chunk.get_constant(val_offset);
                     self.push(val);
+                }
+
+                Instruction::OpDefineGlobal(val_offset) => {
+                    let ident = self.chunk.get_constant(val_offset);
+                    match ident {
+                        Value::String(ident_str) => {
+                            let init_val = self.pop()?;
+                            self.globals.insert(ident_str, init_val);
+                        }
+                        _ => {
+                            return Err(InterpretError::InternalError);
+                        }
+                    }
                 }
 
                 Instruction::OpInvalid => return Err(InterpretError::InternalError),

@@ -22,6 +22,14 @@ impl<'a> Disassembler<'a> {
             format!("{:04} ", self.chunk.get_line(instr_index))
         }
     }
+
+    fn get_constant(&self, const_index: u8) -> String {
+        if let Some(val) = self.chunk.get_constant_checked(const_index) {
+            format!("'{:?}'", val)
+        } else {
+            "<out-of-bound>".to_string()
+        }
+    }
 }
 
 impl<'a> Iterator for Disassembler<'a> {
@@ -33,13 +41,23 @@ impl<'a> Iterator for Disassembler<'a> {
             match instr {
                 Instruction::OpConstant(val_offset) => {
                     result.push_str(
-                        format!("OP_CONSTANT {:>16}", format!("{:04}", val_offset)).as_str(),
+                        format!(
+                            "OP_CONSTANT {:>16} {}",
+                            format!("{:04}", val_offset),
+                            self.get_constant(val_offset)
+                        )
+                        .as_str(),
                     );
-                    if let Some(val) = self.chunk.get_constant_checked(val_offset) {
-                        result.push_str(format!(" '{:?}'", val).as_str());
-                    } else {
-                        result.push_str("<out-of-bound>");
-                    }
+                }
+                Instruction::OpDefineGlobal(val_offset) => {
+                    result.push_str(
+                        format!(
+                            "OP_DEFINE_GLOBAL {:>11} {}",
+                            format!("{:04}", val_offset),
+                            self.get_constant(val_offset)
+                        )
+                        .as_str(),
+                    );
                 }
                 Instruction::OpNegate => result.push_str("OP_NEGATE"),
                 Instruction::OpAdd => result.push_str("OP_ADD"),

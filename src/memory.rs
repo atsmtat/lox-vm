@@ -2,7 +2,7 @@ use fnv::FnvHashSet;
 use std::borrow::Borrow;
 use std::cmp::{Eq, PartialEq};
 use std::fmt;
-use std::hash::{BuildHasher, Hash, Hasher};
+use std::hash::{Hash, Hasher};
 use std::ops::Deref;
 use std::ptr::NonNull;
 

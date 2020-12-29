@@ -58,84 +58,29 @@ impl<'a> Parser<'a> {
     pub fn parse(&mut self) {
         self.program();
         if !self.had_error {
-            self.chunk
-                .add_instruction(Instruction::OpReturn, self.curr_line);
+            self.emit_instruction(Instruction::OpReturn, self.curr_line);
         }
     }
 
-    fn advance(&mut self) -> Option<Token<'a>> {
-        while let Some(tok_or_err) = self.scanner.next() {
-            match tok_or_err {
-                Ok(tok) => {
-                    self.curr_line = tok.line;
-                    return Some(tok);
-                }
-                Err(err) => {
-                    self.error_in_scan(err);
-                }
-            }
+    // === code emitters ===
+    fn emit_instruction(&mut self, instr: Instruction, line: u32) {
+        self.chunk.add_instruction(instr, line);
+    }
+
+    fn emit_constant(&mut self, val: Value) -> u8 {
+        let const_ix = self.chunk.add_constant(val);
+        if const_ix == u8::MAX - 1 {
+            self.report_error(self.curr_line, "too many constants in one chunk");
         }
-        None
+        const_ix
     }
 
-    fn peek(&mut self) -> Option<Token<'a>> {
-        while let Some(tok_or_err) = self.scanner.peek() {
-            match tok_or_err.clone() {
-                Ok(tok) => {
-                    return Some(tok);
-                }
-                Err(err) => {
-                    self.error_in_scan(err);
-                }
-            }
-        }
-        None
+    fn emit_identifier(&mut self, ident: String) -> u8 {
+        let val = self.heap.allocate_string(ident);
+        self.emit_constant(Value::String(val))
     }
 
-    fn consume(&mut self, tok_kind: TokenKind) {
-        match self.advance() {
-            Some(tok) => {
-                if tok.kind != tok_kind {
-                    let msg = format!(
-                        "mismatched token; expected {:?}, found {:?}",
-                        tok_kind, tok.kind
-                    );
-                    self.report_error(tok.line, &msg);
-                }
-            }
-            None => {
-                let msg = format!("mismatched token; expected {:?}, found EOF", tok_kind);
-                self.report_error(self.curr_line, &msg);
-            }
-        }
-    }
-
-    fn error_in_scan(&mut self, err: ScannerError) {
-        match err {
-            ScannerError::UnterminatedString(line) => {
-                self.report_error(line, "unterminated string literal");
-            }
-            ScannerError::UnrecognizedChar(line) => {
-                self.report_error(line, "unrecognized character");
-            }
-        }
-    }
-
-    fn report_error(&mut self, line: u32, msg: &str) {
-        if self.panic_mode {
-            return;
-        }
-        eprintln!("[line {}] Error: {}", line, msg);
-        self.had_error = true;
-
-        // to be reset at the next synchronization point
-        self.panic_mode = true;
-    }
-
-    fn is_eof(&mut self) -> bool {
-        self.scanner.peek().is_none()
-    }
-
+    // === parsing methods ===
     fn program(&mut self) {
         while !self.is_eof() {
             self.declaration();
@@ -143,7 +88,24 @@ impl<'a> Parser<'a> {
     }
 
     fn declaration(&mut self) {
-        self.statement();
+        match self.peek() {
+            Some(tok) => match tok.kind {
+                TokenKind::Var => {
+                    self.advance();
+                    self.var_decl();
+                }
+                _ => {
+                    self.statement();
+                }
+            },
+            None => {
+                self.unexpected_eof();
+            }
+        }
+
+        if self.panic_mode {
+            self.synchronize();
+        }
     }
 
     fn statement(&mut self) {
@@ -161,37 +123,49 @@ impl<'a> Parser<'a> {
         }
     }
 
+    fn var_decl(&mut self) {
+        let (ident, line) = self.consume_identifier();
+
+        if let Some(tok) = self.peek() {
+            match tok.kind {
+                TokenKind::Equal => {
+                    self.advance();
+                    self.expression();
+                }
+                _ => {
+                    // if initializer expression is missing, assign
+                    // nil as the initial value.
+                    self.emit_instruction(Instruction::OpNil, line);
+                }
+            }
+        }
+        self.consume(TokenKind::Semicolon);
+
+        // store variable name in constant table
+        let offset = self.emit_identifier(ident);
+        self.emit_instruction(Instruction::OpDefineGlobal(offset), line);
+    }
+
     fn print_statement(&mut self) {
         self.expression();
         self.consume(TokenKind::Semicolon);
-        self.chunk
-            .add_instruction(Instruction::OpPrint, self.curr_line);
+        self.emit_instruction(Instruction::OpPrint, self.curr_line);
     }
 
     fn expr_statement(&mut self) {
         self.expression();
         self.consume(TokenKind::Semicolon);
-        self.chunk
-            .add_instruction(Instruction::OpPop, self.curr_line);
+        self.emit_instruction(Instruction::OpPop, self.curr_line);
     }
 
     fn expression(&mut self) {
         self.parse_precedence(Precedence::Assignment as i32)
     }
 
-    fn add_constant(&mut self, val: Value, line: u32) {
-        let const_ix = self.chunk.add_constant(val);
-        if const_ix == u8::MAX - 1 {
-            self.report_error(line, "too many constants in one chunk");
-        } else {
-            self.chunk
-                .add_instruction(Instruction::OpConstant(const_ix), line);
-        }
-    }
-
     fn number(&mut self, tok: Token<'a>) {
         let val = tok.lexeme.parse::<f64>().unwrap();
-        self.add_constant(Value::Double(val), tok.line);
+        let offset = self.emit_constant(Value::Double(val));
+        self.emit_instruction(Instruction::OpConstant(offset), tok.line);
     }
 
     fn string(&mut self, tok: Token<'a>) {
@@ -200,19 +174,21 @@ impl<'a> Parser<'a> {
 
         // allocate gc string object on the heap
         let str_obj = self.heap.allocate_string(string_lit);
-        self.add_constant(Value::String(str_obj), tok.line);
+
+        let offset = self.emit_constant(Value::String(str_obj));
+        self.emit_instruction(Instruction::OpConstant(offset), tok.line);
     }
 
     fn literal(&mut self, tok: Token<'a>) {
         match tok.kind {
             TokenKind::True => {
-                self.chunk.add_instruction(Instruction::OpTrue, tok.line);
+                self.emit_instruction(Instruction::OpTrue, tok.line);
             }
             TokenKind::False => {
-                self.chunk.add_instruction(Instruction::OpFalse, tok.line);
+                self.emit_instruction(Instruction::OpFalse, tok.line);
             }
             TokenKind::Nil => {
-                self.chunk.add_instruction(Instruction::OpNil, tok.line);
+                self.emit_instruction(Instruction::OpNil, tok.line);
             }
             _ => {
                 self.report_error(tok.line, "invalid literal");
@@ -229,10 +205,10 @@ impl<'a> Parser<'a> {
         self.parse_precedence(Precedence::Unary as i32);
         match tok.kind {
             TokenKind::Minus => {
-                self.chunk.add_instruction(Instruction::OpNegate, tok.line);
+                self.emit_instruction(Instruction::OpNegate, tok.line);
             }
             TokenKind::Bang => {
-                self.chunk.add_instruction(Instruction::OpNot, tok.line);
+                self.emit_instruction(Instruction::OpNot, tok.line);
             }
             _ => {
                 self.report_error(tok.line, "invalid prefix operator");
@@ -245,28 +221,24 @@ impl<'a> Parser<'a> {
         self.parse_precedence(my_prec as i32 + 1);
 
         match tok.kind {
-            TokenKind::Plus => self.chunk.add_instruction(Instruction::OpAdd, tok.line),
-            TokenKind::Minus => self
-                .chunk
-                .add_instruction(Instruction::OpSubtract, tok.line),
-            TokenKind::Star => self
-                .chunk
-                .add_instruction(Instruction::OpMultiply, tok.line),
-            TokenKind::Slash => self.chunk.add_instruction(Instruction::OpDivide, tok.line),
+            TokenKind::Plus => self.emit_instruction(Instruction::OpAdd, tok.line),
+            TokenKind::Minus => self.emit_instruction(Instruction::OpSubtract, tok.line),
+            TokenKind::Star => self.emit_instruction(Instruction::OpMultiply, tok.line),
+            TokenKind::Slash => self.emit_instruction(Instruction::OpDivide, tok.line),
             TokenKind::BangEqual => {
-                self.chunk.add_instruction(Instruction::OpEqual, tok.line);
-                self.chunk.add_instruction(Instruction::OpNot, tok.line);
+                self.emit_instruction(Instruction::OpEqual, tok.line);
+                self.emit_instruction(Instruction::OpNot, tok.line);
             }
-            TokenKind::EqualEqual => self.chunk.add_instruction(Instruction::OpEqual, tok.line),
-            TokenKind::Greater => self.chunk.add_instruction(Instruction::OpGreater, tok.line),
+            TokenKind::EqualEqual => self.emit_instruction(Instruction::OpEqual, tok.line),
+            TokenKind::Greater => self.emit_instruction(Instruction::OpGreater, tok.line),
             TokenKind::GreaterEqual => {
-                self.chunk.add_instruction(Instruction::OpLess, tok.line);
-                self.chunk.add_instruction(Instruction::OpNot, tok.line);
+                self.emit_instruction(Instruction::OpLess, tok.line);
+                self.emit_instruction(Instruction::OpNot, tok.line);
             }
-            TokenKind::Less => self.chunk.add_instruction(Instruction::OpLess, tok.line),
+            TokenKind::Less => self.emit_instruction(Instruction::OpLess, tok.line),
             TokenKind::LessEqual => {
-                self.chunk.add_instruction(Instruction::OpGreater, tok.line);
-                self.chunk.add_instruction(Instruction::OpNot, tok.line);
+                self.emit_instruction(Instruction::OpGreater, tok.line);
+                self.emit_instruction(Instruction::OpNot, tok.line);
             }
             _ => {
                 self.report_error(tok.line, "invalid binary operator");
@@ -345,6 +317,135 @@ impl<'a> Parser<'a> {
             TokenKind::Less => Some(Self::binary),
             TokenKind::LessEqual => Some(Self::binary),
             _ => None,
+        }
+    }
+
+    // === parse utils ===
+    fn advance(&mut self) -> Option<Token<'a>> {
+        while let Some(tok_or_err) = self.scanner.next() {
+            match tok_or_err {
+                Ok(tok) => {
+                    self.curr_line = tok.line;
+                    return Some(tok);
+                }
+                Err(err) => {
+                    self.error_in_scan(err);
+                }
+            }
+        }
+        None
+    }
+
+    fn peek(&mut self) -> Option<Token<'a>> {
+        while let Some(tok_or_err) = self.scanner.peek() {
+            match tok_or_err.clone() {
+                Ok(tok) => {
+                    return Some(tok);
+                }
+                Err(err) => {
+                    self.error_in_scan(err);
+                }
+            }
+        }
+        None
+    }
+
+    fn consume(&mut self, tok_kind: TokenKind) {
+        match self.advance() {
+            Some(tok) => {
+                if tok.kind != tok_kind {
+                    let msg = format!(
+                        "mismatched token; expected {:?}, found {:?}",
+                        tok_kind, tok.kind
+                    );
+                    self.report_error(tok.line, &msg);
+                }
+            }
+            None => {
+                let msg = format!("mismatched token; expected {:?}, found EOF", tok_kind);
+                self.report_error(self.curr_line, &msg);
+            }
+        }
+    }
+
+    fn consume_identifier(&mut self) -> (String, u32) {
+        match self.advance() {
+            Some(tok) => match tok.kind {
+                TokenKind::Identifier => (tok.lexeme.to_string(), tok.line),
+                _ => {
+                    let msg = format!(
+                        "mismatched token; expected {:?}, found {:?}",
+                        TokenKind::Identifier,
+                        tok.kind
+                    );
+                    self.report_error(tok.line, &msg);
+                    ("".to_string(), 0)
+                }
+            },
+            None => {
+                let msg = format!(
+                    "mismatched token; expected {:?}, found EOF",
+                    TokenKind::Identifier
+                );
+                self.report_error(self.curr_line, &msg);
+                ("".to_string(), 0)
+            }
+        }
+    }
+
+    fn error_in_scan(&mut self, err: ScannerError) {
+        match err {
+            ScannerError::UnterminatedString(line) => {
+                self.report_error(line, "unterminated string literal");
+            }
+            ScannerError::UnrecognizedChar(line) => {
+                self.report_error(line, "unrecognized character");
+            }
+        }
+    }
+
+    fn unexpected_eof(&mut self) {
+        self.report_error(self.curr_line, "unexpected EOF");
+    }
+
+    fn report_error(&mut self, line: u32, msg: &str) {
+        if self.panic_mode {
+            return;
+        }
+        eprintln!("[line {}] Error: {}", line, msg);
+        self.had_error = true;
+
+        // to be reset at the next synchronization point
+        self.panic_mode = true;
+    }
+
+    fn is_eof(&mut self) -> bool {
+        self.scanner.peek().is_none()
+    }
+
+    fn synchronize(&mut self) {
+        self.panic_mode = false;
+
+        while let Some(tok) = self.peek() {
+            match tok.kind {
+                TokenKind::Fun
+                | TokenKind::Class
+                | TokenKind::If
+                | TokenKind::For
+                | TokenKind::While
+                | TokenKind::Var
+                | TokenKind::Print
+                | TokenKind::Return => {
+                    return;
+                }
+                TokenKind::Semicolon => {
+                    self.advance();
+                    return;
+                }
+                _ => {
+                    self.advance();
+                }
+            }
         }
     }
 }

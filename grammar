@@ -1,0 +1,46 @@
+program -> declaration* EOF
+declaration -> fun_decl
+             | var_decl
+             | statement
+var_decl -> 'var' IDENTIFIER ('=' expression)? ';'
+
+fun_decl -> 'fun' function
+function -> IDENTIFIER '(' parameters? ')' block
+parameters -> IDENTIFIER (',' IDENTIFIER)*
+
+statement -> expr_stmt
+           | print_stmt
+           | return_stmt
+           | if_stmt
+           | while_stmt
+           | for_stmt
+           | block
+
+expr_stmt -> expression ';'
+print_stmt -> Print expression ';'
+return_stmt -> Return expression? ';'
+if_stmt -> 'if' '(' expression ')' statement ('else' statement)?
+while_stmt -> 'while' '(' expression ')' statement
+for_stmt -> 'for' '(' (var_decl | expr_stmt | ';')
+                   expression? ';'
+                   expression? ')' statement
+block -> '{' declaration* '}'
+
+expression -> assignment
+assignment -> IDENTIFIER '=' assignment
+            | logic_or
+
+logic_or -> logic_and ('or' logic_and)*
+logic_and -> equality ('and' equality)*
+equality -> comparison (( '==' | '!=' ) comparison)*
+comparison -> addition (( '>' | '>=' | '<' | '<=') addition)*
+addition -> multiplication (('+' | '-' ) multiplication)*
+multiplication -> unary (('*' | '/') unary)*
+unary -> ('!' | '-') unary
+         | call
+
+call -> primary ( '(' arguments? ')' )*
+arguments -> expression ( ',' expression )*
+primary -> literal | grouping | IDENTIFIER
+literal -> STR | NUMBER | 'nil' | 'true' | 'false'
+grouping -> '(' expression ')'
