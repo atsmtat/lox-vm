@@ -1,5 +1,5 @@
 use crate::chunk::{Chunk, Instruction};
-use crate::error::InterpretError;
+use crate::error::{ErrorKind, RuntimeError, VmError};
 use crate::memory::{Gc, Heap, StrObj};
 use crate::value::Value;
 use fnv::FnvHashMap;
@@ -25,22 +25,11 @@ impl<'a> Vm<'a> {
         }
     }
 
-    fn get_number(&mut self) -> Result<f64, InterpretError> {
-        let val = self.pop()?;
-        match val {
-            Value::Double(v) => Ok(v),
-            _ => {
-                self.report_error("operand must be a number");
-                return Err(InterpretError::RuntimeError);
-            }
-        }
+    fn runtime_error(&self, kind: ErrorKind) -> RuntimeError {
+        RuntimeError::new(self.chunk.get_line(self.ip), kind)
     }
 
-    fn report_error(&self, msg: &str) {
-        eprintln!("[line {}] Error: {}", self.chunk.get_line(self.ip), msg);
-    }
-
-    pub fn run(&mut self) -> Result<(), InterpretError> {
+    pub fn run(&mut self) -> Result<(), RuntimeError> {
         for (instr_index, instr) in self.chunk.iter().enumerate() {
             self.ip = instr_index;
             match instr {
@@ -57,9 +46,8 @@ impl<'a> Vm<'a> {
                 }
 
                 Instruction::OpNegate => {
-                    let val = self.get_number()?;
-                    let result = Value::Double(-val);
-                    self.push(result);
+                    let val = self.pop_number()?;
+                    self.push(Value::Double(-val));
                 }
 
                 Instruction::OpNot => {
@@ -74,53 +62,51 @@ impl<'a> Vm<'a> {
                     let result = match lhs {
                         Value::String(lstr) => match rhs {
                             Value::String(rstr) => Ok(self.concatenate(lstr, rstr)),
-                            _ => lhs + rhs,
+                            _ => Err(self.runtime_error(ErrorKind::InvalidOperand(rhs))),
                         },
-                        _ => lhs + rhs,
+                        Value::Double(lnum) => match rhs {
+                            Value::Double(rnum) => Ok(Value::Double(lnum + rnum)),
+                            _ => Err(self.runtime_error(ErrorKind::InvalidOperand(rhs))),
+                        },
+                        _ => Err(self.runtime_error(ErrorKind::InvalidOperand(lhs))),
                     };
                     self.push(result?);
                 }
 
                 Instruction::OpSubtract => {
-                    let rhs = self.pop()?;
-                    let lhs = self.pop()?;
-                    let result = lhs - rhs;
-                    self.push(result?);
+                    let rhs = self.pop_number()?;
+                    let lhs = self.pop_number()?;
+                    self.push(Value::Double(lhs - rhs));
                 }
 
                 Instruction::OpMultiply => {
-                    let rhs = self.pop()?;
-                    let lhs = self.pop()?;
-                    let result = lhs * rhs;
-                    self.push(result?);
+                    let rhs = self.pop_number()?;
+                    let lhs = self.pop_number()?;
+                    self.push(Value::Double(lhs * rhs));
                 }
 
                 Instruction::OpDivide => {
-                    let rhs = self.pop()?;
-                    let lhs = self.pop()?;
-                    let result = lhs / rhs;
-                    self.push(result?);
+                    let rhs = self.pop_number()?;
+                    let lhs = self.pop_number()?;
+                    self.push(Value::Double(lhs / rhs));
                 }
 
                 Instruction::OpEqual => {
                     let rhs = self.pop()?;
                     let lhs = self.pop()?;
-                    let result = Value::Boolean(lhs == rhs);
-                    self.push(result);
+                    self.push(Value::Boolean(lhs == rhs));
                 }
 
                 Instruction::OpGreater => {
-                    let rhs = self.pop()?;
-                    let lhs = self.pop()?;
-                    let result = lhs.gt(&rhs);
-                    self.push(result?);
+                    let rhs = self.pop_number()?;
+                    let lhs = self.pop_number()?;
+                    self.push(Value::Boolean(lhs > rhs));
                 }
 
                 Instruction::OpLess => {
-                    let rhs = self.pop()?;
-                    let lhs = self.pop()?;
-                    let result = lhs.lt(&rhs);
-                    self.push(result?);
+                    let rhs = self.pop_number()?;
+                    let lhs = self.pop_number()?;
+                    self.push(Value::Boolean(lhs < rhs));
                 }
 
                 Instruction::OpTrue => self.push(Value::Boolean(true)),
@@ -140,12 +126,38 @@ impl<'a> Vm<'a> {
                             self.globals.insert(ident_str, init_val);
                         }
                         _ => {
-                            return Err(InterpretError::InternalError);
+                            let err_kind =
+                                ErrorKind::InternalError(VmError::UnexpectedValue(ident));
+                            return Err(self.runtime_error(err_kind));
                         }
                     }
                 }
 
-                Instruction::OpInvalid => return Err(InterpretError::InternalError),
+                Instruction::OpGetGlobal(val_offset) => {
+                    let ident = self.chunk.get_constant(val_offset);
+                    match ident {
+                        Value::String(ident_str) => match self.globals.get(&ident_str) {
+                            Some(val) => {
+                                let result = *val;
+                                self.push(result);
+                            }
+                            None => {
+                                let err_kind = ErrorKind::UndefinedVariable(ident);
+                                return Err(self.runtime_error(err_kind));
+                            }
+                        },
+                        _ => {
+                            let err_kind =
+                                ErrorKind::InternalError(VmError::UnexpectedValue(ident));
+                            return Err(self.runtime_error(err_kind));
+                        }
+                    }
+                }
+
+                Instruction::OpInvalid => {
+                    let err_kind = ErrorKind::InternalError(VmError::InvalidOpCode);
+                    return Err(self.runtime_error(err_kind));
+                }
             }
         }
         Ok(())
@@ -155,11 +167,19 @@ impl<'a> Vm<'a> {
         self.stack.push(val);
     }
 
-    fn pop(&mut self) -> Result<Value, InterpretError> {
+    fn pop(&mut self) -> Result<Value, RuntimeError> {
         if let Some(val) = self.stack.pop() {
             Ok(val)
         } else {
-            Err(InterpretError::InternalError)
+            Err(self.runtime_error(ErrorKind::InternalError(VmError::EmptyStackPop)))
+        }
+    }
+
+    fn pop_number(&mut self) -> Result<f64, RuntimeError> {
+        let val = self.pop()?;
+        match val {
+            Value::Double(v) => Ok(v),
+            _ => Err(self.runtime_error(ErrorKind::InvalidOperand(val))),
         }
     }
 

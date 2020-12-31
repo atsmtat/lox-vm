@@ -1,21 +1,19 @@
 use crate::chunk::{Chunk, Instruction};
 use crate::debug;
-use crate::error::InterpretError;
 use crate::memory::Heap;
 use crate::scanner::{Scanner, ScannerError, Token, TokenKind};
 use crate::value::Value;
 
-pub fn compile(source: &str, chunk: &mut Chunk, heap: &mut Heap) -> Result<(), InterpretError> {
+pub fn compile(source: &str, chunk: &mut Chunk, heap: &mut Heap) -> Option<()> {
     let scanner = Scanner::new(source);
     let mut parser = Parser::new(scanner, chunk, heap);
-    parser.parse();
-    if parser.had_error {
-        Err(InterpretError::CompileError)
-    } else {
+    if parser.parse() {
         if cfg!(debug_assertions) {
             debug::disassemble_chunk(chunk, "code");
         }
-        Ok(())
+        Some(())
+    } else {
+        None
     }
 }
 
@@ -23,7 +21,7 @@ struct Parser<'a> {
     scanner: std::iter::Peekable<Scanner<'a>>,
     chunk: &'a mut Chunk,
     heap: &'a mut Heap,
-    pub had_error: bool,
+    had_error: bool,
     panic_mode: bool,
     curr_line: u32,
 }
@@ -55,11 +53,12 @@ impl<'a> Parser<'a> {
         }
     }
 
-    pub fn parse(&mut self) {
+    pub fn parse(&mut self) -> bool {
         self.program();
         if !self.had_error {
             self.emit_instruction(Instruction::OpReturn, self.curr_line);
         }
+        !self.had_error
     }
 
     // === code emitters ===
@@ -179,6 +178,12 @@ impl<'a> Parser<'a> {
         self.emit_instruction(Instruction::OpConstant(offset), tok.line);
     }
 
+    fn variable(&mut self, tok: Token<'a>) {
+        let var_name = tok.lexeme.to_string();
+        let offset = self.emit_identifier(var_name);
+        self.emit_instruction(Instruction::OpGetGlobal(offset), tok.line);
+    }
+
     fn literal(&mut self, tok: Token<'a>) {
         match tok.kind {
             TokenKind::True => {
@@ -279,6 +284,7 @@ impl<'a> Parser<'a> {
             TokenKind::LeftParen => Some(Self::grouping),
             TokenKind::Number => Some(Self::number),
             TokenKind::String => Some(Self::string),
+            TokenKind::Identifier => Some(Self::variable),
             TokenKind::True => Some(Self::literal),
             TokenKind::False => Some(Self::literal),
             TokenKind::Nil => Some(Self::literal),

@@ -17,6 +17,7 @@ const OP_LESS: u8 = 14;
 const OP_PRINT: u8 = 15;
 const OP_POP: u8 = 16;
 const OP_DEFINE_GLOBAL: u8 = 17;
+const OP_GET_GLOBAL: u8 = 18;
 
 const OP_INVALID: u8 = u8::MAX;
 
@@ -38,6 +39,7 @@ pub enum Instruction {
     OpPop,
     OpReturn,
     OpDefineGlobal(u8),
+    OpGetGlobal(u8),
     OpInvalid,
 }
 
@@ -61,6 +63,7 @@ impl From<Instruction> for Vec<u8> {
             Instruction::OpPrint => vec![OP_PRINT],
             Instruction::OpPop => vec![OP_POP],
             Instruction::OpDefineGlobal(offset) => vec![OP_DEFINE_GLOBAL, offset],
+            Instruction::OpGetGlobal(offset) => vec![OP_GET_GLOBAL, offset],
             Instruction::OpInvalid => vec![OP_INVALID],
         }
     }
@@ -152,6 +155,13 @@ impl<'a> Iterator for InstructionIter<'a> {
             OP_DEFINE_GLOBAL => {
                 if let Some(offset) = self.code_iter.next() {
                     Instruction::OpDefineGlobal(*offset)
+                } else {
+                    Instruction::OpInvalid
+                }
+            }
+            OP_GET_GLOBAL => {
+                if let Some(offset) = self.code_iter.next() {
+                    Instruction::OpGetGlobal(*offset)
                 } else {
                     Instruction::OpInvalid
                 }

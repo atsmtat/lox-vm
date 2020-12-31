@@ -59,6 +59,16 @@ impl<'a> Iterator for Disassembler<'a> {
                         .as_str(),
                     );
                 }
+                Instruction::OpGetGlobal(val_offset) => {
+                    result.push_str(
+                        format!(
+                            "OP_GET_GLOBAL {:>14} {}",
+                            format!("{:04}", val_offset),
+                            self.get_constant(val_offset)
+                        )
+                        .as_str(),
+                    );
+                }
                 Instruction::OpNegate => result.push_str("OP_NEGATE"),
                 Instruction::OpAdd => result.push_str("OP_ADD"),
                 Instruction::OpSubtract => result.push_str("OP_SUBTRACT"),
