@@ -119,36 +119,34 @@ impl<'a> Vm<'a> {
                 }
 
                 Instruction::OpDefineGlobal(val_offset) => {
-                    let ident = self.chunk.get_constant(val_offset);
-                    match ident {
-                        Value::String(ident_str) => {
-                            let init_val = self.pop()?;
-                            self.globals.insert(ident_str, init_val);
+                    let var_name = self.get_variable_at(val_offset)?;
+                    let init_val = self.pop()?;
+                    self.globals.insert(var_name, init_val);
+                }
+
+                Instruction::OpGetGlobal(val_offset) => {
+                    let var_name = self.get_variable_at(val_offset)?;
+                    match self.globals.get(&var_name) {
+                        Some(val) => {
+                            let result = *val;
+                            self.push(result);
                         }
-                        _ => {
-                            let err_kind =
-                                ErrorKind::InternalError(VmError::UnexpectedValue(ident));
+                        None => {
+                            let err_kind = ErrorKind::UndefinedVariable(Value::String(var_name));
                             return Err(self.runtime_error(err_kind));
                         }
                     }
                 }
 
-                Instruction::OpGetGlobal(val_offset) => {
-                    let ident = self.chunk.get_constant(val_offset);
-                    match ident {
-                        Value::String(ident_str) => match self.globals.get(&ident_str) {
-                            Some(val) => {
-                                let result = *val;
-                                self.push(result);
-                            }
-                            None => {
-                                let err_kind = ErrorKind::UndefinedVariable(ident);
-                                return Err(self.runtime_error(err_kind));
-                            }
-                        },
-                        _ => {
-                            let err_kind =
-                                ErrorKind::InternalError(VmError::UnexpectedValue(ident));
+                Instruction::OpSetGlobal(val_offset) => {
+                    let var_name = self.get_variable_at(val_offset)?;
+                    let new_val = self.peek()?;
+                    match self.globals.get_mut(&var_name) {
+                        Some(val) => {
+                            *val = new_val;
+                        }
+                        None => {
+                            let err_kind = ErrorKind::UndefinedVariable(Value::String(var_name));
                             return Err(self.runtime_error(err_kind));
                         }
                     }
@@ -175,11 +173,30 @@ impl<'a> Vm<'a> {
         }
     }
 
+    fn peek(&mut self) -> Result<Value, RuntimeError> {
+        if let Some(val) = self.stack.last() {
+            Ok(*val)
+        } else {
+            Err(self.runtime_error(ErrorKind::InternalError(VmError::EmptyStackPop)))
+        }
+    }
+
     fn pop_number(&mut self) -> Result<f64, RuntimeError> {
         let val = self.pop()?;
         match val {
             Value::Double(v) => Ok(v),
             _ => Err(self.runtime_error(ErrorKind::InvalidOperand(val))),
+        }
+    }
+
+    fn get_variable_at(&self, offset: u8) -> Result<Gc<StrObj>, RuntimeError> {
+        let ident = self.chunk.get_constant(offset);
+        match ident {
+            Value::String(ident_str) => Ok(ident_str),
+            _ => {
+                let err_kind = ErrorKind::InternalError(VmError::UnexpectedValue(ident));
+                Err(self.runtime_error(err_kind))
+            }
         }
     }
 

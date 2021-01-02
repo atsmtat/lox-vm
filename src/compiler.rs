@@ -41,6 +41,8 @@ enum Precedence {
     Primary,
 }
 
+type Parselet<'a> = fn(&mut Parser<'a>, Token<'a>, bool);
+
 impl<'a> Parser<'a> {
     pub fn new(scanner: Scanner<'a>, chunk: &'a mut Chunk, heap: &'a mut Heap) -> Self {
         Parser {
@@ -161,13 +163,13 @@ impl<'a> Parser<'a> {
         self.parse_precedence(Precedence::Assignment as i32)
     }
 
-    fn number(&mut self, tok: Token<'a>) {
+    fn number(&mut self, tok: Token<'a>, _: bool) {
         let val = tok.lexeme.parse::<f64>().unwrap();
         let offset = self.emit_constant(Value::Double(val));
         self.emit_instruction(Instruction::OpConstant(offset), tok.line);
     }
 
-    fn string(&mut self, tok: Token<'a>) {
+    fn string(&mut self, tok: Token<'a>, _: bool) {
         // trim enclosing '"' from the input string
         let string_lit = tok.lexeme.trim_matches('"').to_string();
 
@@ -178,13 +180,19 @@ impl<'a> Parser<'a> {
         self.emit_instruction(Instruction::OpConstant(offset), tok.line);
     }
 
-    fn variable(&mut self, tok: Token<'a>) {
+    fn variable(&mut self, tok: Token<'a>, can_assign: bool) {
         let var_name = tok.lexeme.to_string();
         let offset = self.emit_identifier(var_name);
-        self.emit_instruction(Instruction::OpGetGlobal(offset), tok.line);
+
+        if can_assign && self.consume_if(TokenKind::Equal).is_some() {
+            self.expression();
+            self.emit_instruction(Instruction::OpSetGlobal(offset), tok.line);
+        } else {
+            self.emit_instruction(Instruction::OpGetGlobal(offset), tok.line);
+        }
     }
 
-    fn literal(&mut self, tok: Token<'a>) {
+    fn literal(&mut self, tok: Token<'a>, _: bool) {
         match tok.kind {
             TokenKind::True => {
                 self.emit_instruction(Instruction::OpTrue, tok.line);
@@ -201,12 +209,12 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn grouping(&mut self, _: Token<'a>) {
+    fn grouping(&mut self, _: Token<'a>, _: bool) {
         self.expression();
         self.consume(TokenKind::RightParen);
     }
 
-    fn unary(&mut self, tok: Token<'a>) {
+    fn unary(&mut self, tok: Token<'a>, _: bool) {
         self.parse_precedence(Precedence::Unary as i32);
         match tok.kind {
             TokenKind::Minus => {
@@ -221,7 +229,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn binary(&mut self, tok: Token<'a>) {
+    fn binary(&mut self, tok: Token<'a>, _: bool) {
         let my_prec = self.infix_prec(tok.kind);
         self.parse_precedence(my_prec as i32 + 1);
 
@@ -259,9 +267,13 @@ impl<'a> Parser<'a> {
         }
         let tok = tok.unwrap();
 
+        // individual parselets look for next assignment token, only
+        // if they're told from here.
+        let can_assign = prec <= Precedence::Assignment as i32;
+
         // parse prefix
         if let Some(parselet) = self.prefix_rule(tok.kind) {
-            parselet(self, tok);
+            parselet(self, tok, can_assign);
         } else {
             self.report_error(tok.line, "expected expression");
         }
@@ -272,14 +284,20 @@ impl<'a> Parser<'a> {
             if prec <= (next_prec as i32) {
                 let parselet = self.infix_rule(tok.kind).unwrap();
                 self.advance();
-                parselet(self, tok);
+                parselet(self, tok, can_assign);
             } else {
                 break;
             }
         }
+
+        if can_assign {
+            if let Some(assign) = self.consume_if(TokenKind::Equal) {
+                self.report_error(assign.line, "invalid assignment target");
+            }
+        }
     }
 
-    fn prefix_rule(&self, tok_kind: TokenKind) -> Option<fn(&mut Self, Token<'a>)> {
+    fn prefix_rule(&self, tok_kind: TokenKind) -> Option<Parselet<'a>> {
         match tok_kind {
             TokenKind::LeftParen => Some(Self::grouping),
             TokenKind::Number => Some(Self::number),
@@ -310,7 +328,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn infix_rule(&self, tok_kind: TokenKind) -> Option<fn(&mut Self, Token<'a>)> {
+    fn infix_rule(&self, tok_kind: TokenKind) -> Option<Parselet<'a>> {
         match tok_kind {
             TokenKind::Minus => Some(Self::binary),
             TokenKind::Plus => Some(Self::binary),
@@ -397,6 +415,16 @@ impl<'a> Parser<'a> {
                 ("".to_string(), 0)
             }
         }
+    }
+
+    fn consume_if(&mut self, tok_kind: TokenKind) -> Option<Token<'a>> {
+        if let Some(tok) = self.peek() {
+            if tok.kind == tok_kind {
+                self.advance();
+                return Some(tok);
+            }
+        }
+        None
     }
 
     fn error_in_scan(&mut self, err: ScannerError) {
