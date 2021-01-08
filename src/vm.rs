@@ -152,6 +152,30 @@ impl<'a> Vm<'a> {
                     }
                 }
 
+                Instruction::OpGetLocal(stack_ix) => match self.stack.get(stack_ix as usize) {
+                    Some(val) => {
+                        let result = *val;
+                        self.push(result);
+                    }
+                    None => {
+                        let err_kind = ErrorKind::InternalError(VmError::EmptyStackPop);
+                        return Err(self.runtime_error(err_kind));
+                    }
+                },
+
+                Instruction::OpSetLocal(stack_ix) => {
+                    let new_val = self.peek()?;
+                    match self.stack.get_mut(stack_ix as usize) {
+                        Some(val) => {
+                            *val = new_val;
+                        }
+                        None => {
+                            let err_kind = ErrorKind::InternalError(VmError::EmptyStackPop);
+                            return Err(self.runtime_error(err_kind));
+                        }
+                    }
+                }
+
                 Instruction::OpInvalid => {
                     let err_kind = ErrorKind::InternalError(VmError::InvalidOpCode);
                     return Err(self.runtime_error(err_kind));

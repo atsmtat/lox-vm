@@ -19,6 +19,8 @@ const OP_POP: u8 = 16;
 const OP_DEFINE_GLOBAL: u8 = 17;
 const OP_GET_GLOBAL: u8 = 18;
 const OP_SET_GLOBAL: u8 = 19;
+const OP_GET_LOCAL: u8 = 20;
+const OP_SET_LOCAL: u8 = 21;
 
 const OP_INVALID: u8 = u8::MAX;
 
@@ -42,6 +44,8 @@ pub enum Instruction {
     OpDefineGlobal(u8),
     OpGetGlobal(u8),
     OpSetGlobal(u8),
+    OpGetLocal(u8),
+    OpSetLocal(u8),
     OpInvalid,
 }
 
@@ -67,6 +71,8 @@ impl From<Instruction> for Vec<u8> {
             Instruction::OpDefineGlobal(offset) => vec![OP_DEFINE_GLOBAL, offset],
             Instruction::OpGetGlobal(offset) => vec![OP_GET_GLOBAL, offset],
             Instruction::OpSetGlobal(offset) => vec![OP_SET_GLOBAL, offset],
+            Instruction::OpGetLocal(offset) => vec![OP_GET_LOCAL, offset],
+            Instruction::OpSetLocal(offset) => vec![OP_SET_LOCAL, offset],
             Instruction::OpInvalid => vec![OP_INVALID],
         }
     }
@@ -172,6 +178,20 @@ impl<'a> Iterator for InstructionIter<'a> {
             OP_SET_GLOBAL => {
                 if let Some(offset) = self.code_iter.next() {
                     Instruction::OpSetGlobal(*offset)
+                } else {
+                    Instruction::OpInvalid
+                }
+            }
+            OP_GET_LOCAL => {
+                if let Some(offset) = self.code_iter.next() {
+                    Instruction::OpGetLocal(*offset)
+                } else {
+                    Instruction::OpInvalid
+                }
+            }
+            OP_SET_LOCAL => {
+                if let Some(offset) = self.code_iter.next() {
+                    Instruction::OpSetLocal(*offset)
                 } else {
                     Instruction::OpInvalid
                 }

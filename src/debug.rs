@@ -79,6 +79,12 @@ impl<'a> Iterator for Disassembler<'a> {
                         .as_str(),
                     );
                 }
+                Instruction::OpGetLocal(stack_slot) => {
+                    result.push_str(format!("OP_GET_LOCAL {:>14}", stack_slot).as_str());
+                }
+                Instruction::OpSetLocal(stack_slot) => {
+                    result.push_str(format!("OP_SET_LOCAL {:>14}", stack_slot).as_str());
+                }
                 Instruction::OpNegate => result.push_str("OP_NEGATE"),
                 Instruction::OpAdd => result.push_str("OP_ADD"),
                 Instruction::OpSubtract => result.push_str("OP_SUBTRACT"),

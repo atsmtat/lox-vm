@@ -17,6 +17,84 @@ pub fn compile(source: &str, chunk: &mut Chunk, heap: &mut Heap) -> Option<()> {
     }
 }
 
+struct Local<'a> {
+    name_token: Token<'a>,
+    depth: usize,
+    initialized: bool,
+}
+
+impl<'a> Local<'a> {
+    pub fn new_uninit(name_token: Token<'a>, depth: usize) -> Self {
+        Local {
+            name_token,
+            depth,
+            initialized: false,
+        }
+    }
+
+    pub fn mark_init(&mut self) {
+        self.initialized = true;
+    }
+
+    pub fn var_name(&self) -> &str {
+        self.name_token.lexeme
+    }
+}
+
+struct CompilerState<'a> {
+    locals: Vec<Local<'a>>,
+    scope_depth: usize,
+}
+
+enum LookupError {
+    Unresolved,
+    ResolvedUninit,
+}
+
+impl<'a> CompilerState<'a> {
+    fn new() -> Self {
+        CompilerState {
+            locals: Vec::new(),
+            scope_depth: 0,
+        }
+    }
+
+    fn in_global_scope(&self) -> bool {
+        self.scope_depth == 0
+    }
+
+    fn add_local(&mut self, name_token: Token<'a>) {
+        self.locals
+            .push(Local::new_uninit(name_token, self.scope_depth));
+    }
+
+    fn init_last_local(&mut self) {
+        if let Some(last) = self.locals.last_mut() {
+            last.initialized = true;
+        }
+    }
+
+    fn locals_count(&self) -> usize {
+        self.locals.len()
+    }
+
+    fn resolve_local(&self, name: &str) -> Result<u8, LookupError> {
+        if let Some((r_ix, found)) = self
+            .locals
+            .iter()
+            .rev()
+            .enumerate()
+            .find(|item| item.1.var_name() == name)
+        {
+            if !found.initialized {
+                return Err(LookupError::ResolvedUninit);
+            }
+            return Ok((self.locals.len() - r_ix - 1) as u8);
+        }
+        return Err(LookupError::Unresolved);
+    }
+}
+
 struct Parser<'a> {
     scanner: std::iter::Peekable<Scanner<'a>>,
     chunk: &'a mut Chunk,
@@ -24,6 +102,7 @@ struct Parser<'a> {
     had_error: bool,
     panic_mode: bool,
     curr_line: u32,
+    compiler_state: CompilerState<'a>,
 }
 
 #[derive(Copy, Clone)]
@@ -52,6 +131,7 @@ impl<'a> Parser<'a> {
             had_error: false,
             panic_mode: false,
             curr_line: 0,
+            compiler_state: CompilerState::new(),
         }
     }
 
@@ -61,6 +141,29 @@ impl<'a> Parser<'a> {
             self.emit_instruction(Instruction::OpReturn, self.curr_line);
         }
         !self.had_error
+    }
+
+    // === compiler state management ===
+    fn begin_scope(&mut self) {
+        self.compiler_state.scope_depth += 1;
+    }
+
+    fn end_scope(&mut self) {
+        self.compiler_state.scope_depth -= 1;
+        let curr_depth = self.compiler_state.scope_depth;
+        let mut drop_count = self
+            .compiler_state
+            .locals
+            .iter()
+            .rev()
+            .take_while(|loc| loc.depth > curr_depth)
+            .count();
+
+        while drop_count > 0 {
+            self.compiler_state.locals.pop();
+            self.emit_instruction(Instruction::OpPop, self.curr_line);
+            drop_count -= 1;
+        }
     }
 
     // === code emitters ===
@@ -85,6 +188,9 @@ impl<'a> Parser<'a> {
     fn program(&mut self) {
         while !self.is_eof() {
             self.declaration();
+            if self.panic_mode {
+                self.synchronize();
+            }
         }
     }
 
@@ -103,10 +209,6 @@ impl<'a> Parser<'a> {
                 self.unexpected_eof();
             }
         }
-
-        if self.panic_mode {
-            self.synchronize();
-        }
     }
 
     fn statement(&mut self) {
@@ -115,6 +217,12 @@ impl<'a> Parser<'a> {
                 TokenKind::Print => {
                     self.advance();
                     self.print_statement();
+                }
+                TokenKind::LeftBrace => {
+                    self.advance();
+                    self.begin_scope();
+                    self.block();
+                    self.end_scope();
                 }
                 _ => {
                     self.expr_statement();
@@ -125,7 +233,16 @@ impl<'a> Parser<'a> {
     }
 
     fn var_decl(&mut self) {
-        let (ident, line) = self.consume_identifier();
+        let ident_tok = self.consume(TokenKind::Identifier);
+        if ident_tok.is_none() {
+            return;
+        }
+        let ident_tok = ident_tok.unwrap();
+
+        if !self.compiler_state.in_global_scope() {
+            // declare local variable
+            self.declare_local_var(ident_tok.clone());
+        }
 
         if let Some(tok) = self.peek() {
             match tok.kind {
@@ -136,15 +253,54 @@ impl<'a> Parser<'a> {
                 _ => {
                     // if initializer expression is missing, assign
                     // nil as the initial value.
-                    self.emit_instruction(Instruction::OpNil, line);
+                    self.emit_instruction(Instruction::OpNil, ident_tok.line);
                 }
             }
         }
         self.consume(TokenKind::Semicolon);
 
-        // store variable name in constant table
-        let offset = self.emit_identifier(ident);
-        self.emit_instruction(Instruction::OpDefineGlobal(offset), line);
+        // define variable
+        if self.compiler_state.in_global_scope() {
+            // global variable
+            let var_name = ident_tok.lexeme.to_string();
+            let var_line = ident_tok.line;
+            // store variable name in constant table
+            let offset = self.emit_identifier(var_name);
+            self.emit_instruction(Instruction::OpDefineGlobal(offset), var_line);
+        } else {
+            // local variable
+            self.compiler_state.init_last_local();
+        }
+    }
+
+    fn declare_local_var(&mut self, var_tok: Token<'a>) {
+        let line = var_tok.line;
+
+        if self.compiler_state.locals_count() == (u8::MAX - 1) as usize {
+            self.report_error(line, "too many local variables in function");
+        }
+
+        let var_name = var_tok.lexeme;
+        let curr_depth = self.compiler_state.scope_depth;
+        let dup_var = self
+            .compiler_state
+            .locals
+            .iter()
+            .rev()
+            .take_while(|loc| curr_depth == loc.depth)
+            .any(|loc| var_name == loc.var_name());
+
+        if dup_var {
+            self.report_error(
+                line,
+                &format!(
+                    "variable with name {} already exists in this scope.",
+                    var_name
+                ),
+            );
+        }
+
+        self.compiler_state.add_local(var_tok.clone());
     }
 
     fn print_statement(&mut self) {
@@ -157,6 +313,16 @@ impl<'a> Parser<'a> {
         self.expression();
         self.consume(TokenKind::Semicolon);
         self.emit_instruction(Instruction::OpPop, self.curr_line);
+    }
+
+    fn block(&mut self) {
+        while let Some(tok) = self.peek() {
+            if tok.kind == TokenKind::RightBrace {
+                break;
+            }
+            self.declaration();
+        }
+        self.consume(TokenKind::RightBrace);
     }
 
     fn expression(&mut self) {
@@ -182,13 +348,39 @@ impl<'a> Parser<'a> {
 
     fn variable(&mut self, tok: Token<'a>, can_assign: bool) {
         let var_name = tok.lexeme.to_string();
-        let offset = self.emit_identifier(var_name);
+        let is_assign = can_assign && self.consume_if(TokenKind::Equal).is_some();
 
-        if can_assign && self.consume_if(TokenKind::Equal).is_some() {
-            self.expression();
-            self.emit_instruction(Instruction::OpSetGlobal(offset), tok.line);
-        } else {
-            self.emit_instruction(Instruction::OpGetGlobal(offset), tok.line);
+        match self.compiler_state.resolve_local(&var_name) {
+            Ok(offset) => {
+                // found a local variable
+                if is_assign {
+                    self.expression();
+                    self.emit_instruction(Instruction::OpSetLocal(offset), tok.line);
+                } else {
+                    self.emit_instruction(Instruction::OpGetLocal(offset), tok.line);
+                }
+            }
+            Err(err) => match err {
+                LookupError::Unresolved => {
+                    // no local with this name, assume it's a global
+                    let offset = self.emit_identifier(var_name);
+                    if is_assign {
+                        self.expression();
+                        self.emit_instruction(Instruction::OpSetGlobal(offset), tok.line);
+                    } else {
+                        self.emit_instruction(Instruction::OpGetGlobal(offset), tok.line);
+                    }
+                }
+                LookupError::ResolvedUninit => {
+                    self.report_error(
+                        tok.line,
+                        &format!(
+                            "can't read local variable {} in its own initializer",
+                            var_name
+                        ),
+                    );
+                }
+            },
         }
     }
 
@@ -374,7 +566,7 @@ impl<'a> Parser<'a> {
         None
     }
 
-    fn consume(&mut self, tok_kind: TokenKind) {
+    fn consume(&mut self, tok_kind: TokenKind) -> Option<Token<'a>> {
         match self.advance() {
             Some(tok) => {
                 if tok.kind != tok_kind {
@@ -383,36 +575,14 @@ impl<'a> Parser<'a> {
                         tok_kind, tok.kind
                     );
                     self.report_error(tok.line, &msg);
+                    return None;
                 }
+                return Some(tok);
             }
             None => {
                 let msg = format!("mismatched token; expected {:?}, found EOF", tok_kind);
                 self.report_error(self.curr_line, &msg);
-            }
-        }
-    }
-
-    fn consume_identifier(&mut self) -> (String, u32) {
-        match self.advance() {
-            Some(tok) => match tok.kind {
-                TokenKind::Identifier => (tok.lexeme.to_string(), tok.line),
-                _ => {
-                    let msg = format!(
-                        "mismatched token; expected {:?}, found {:?}",
-                        TokenKind::Identifier,
-                        tok.kind
-                    );
-                    self.report_error(tok.line, &msg);
-                    ("".to_string(), 0)
-                }
-            },
-            None => {
-                let msg = format!(
-                    "mismatched token; expected {:?}, found EOF",
-                    TokenKind::Identifier
-                );
-                self.report_error(self.curr_line, &msg);
-                ("".to_string(), 0)
+                return None;
             }
         }
     }
