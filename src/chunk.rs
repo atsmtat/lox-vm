@@ -23,6 +23,7 @@ const OP_SET_GLOBAL: u8 = 19;
 const OP_GET_LOCAL: u8 = 20;
 const OP_SET_LOCAL: u8 = 21;
 const OP_JUMP_IF_FALSE: u8 = 22;
+const OP_JUMP: u8 = 23;
 
 const OP_INVALID: u8 = u8::MAX;
 
@@ -49,12 +50,26 @@ pub enum Instruction {
     OpGetLocal(u8),
     OpSetLocal(u8),
     OpJumpIfFalse(u16),
+    OpJump(u16),
     OpInvalid,
 }
 
-impl From<Instruction> for Vec<u8> {
-    fn from(instr: Instruction) -> Self {
-        match instr {
+trait ByteCode {
+    fn encode(self) -> Vec<u8>;
+}
+
+impl ByteCode for u16 {
+    fn encode(self) -> Vec<u8> {
+        vec![
+            ((self >> 8) & 0xff).try_into().unwrap(),
+            (self & 0xff).try_into().unwrap(),
+        ]
+    }
+}
+
+impl ByteCode for Instruction {
+    fn encode(self) -> Vec<u8> {
+        match self {
             Instruction::OpConstant(offset) => vec![OP_CONSTANT, offset],
             Instruction::OpReturn => vec![OP_RETURN],
             Instruction::OpNegate => vec![OP_NEGATE],
@@ -76,11 +91,16 @@ impl From<Instruction> for Vec<u8> {
             Instruction::OpSetGlobal(offset) => vec![OP_SET_GLOBAL, offset],
             Instruction::OpGetLocal(offset) => vec![OP_GET_LOCAL, offset],
             Instruction::OpSetLocal(offset) => vec![OP_SET_LOCAL, offset],
-            Instruction::OpJumpIfFalse(offset) => vec![
-                OP_JUMP_IF_FALSE,
-                ((offset >> 8) & 0xff).try_into().unwrap(),
-                (offset & 0xff).try_into().unwrap(),
-            ],
+            Instruction::OpJumpIfFalse(offset) => {
+                let mut res = vec![OP_JUMP_IF_FALSE];
+                res.append(&mut offset.encode());
+                res
+            }
+            Instruction::OpJump(offset) => {
+                let mut res = vec![OP_JUMP];
+                res.append(&mut offset.encode());
+                res
+            }
             Instruction::OpInvalid => vec![OP_INVALID],
         }
     }
@@ -102,7 +122,7 @@ impl Chunk {
     }
 
     pub fn push_instruction(&mut self, instr: Instruction, line: u32) -> usize {
-        let mut bytes: Vec<u8> = instr.into();
+        let mut bytes = instr.encode();
         let instr_size = bytes.len();
         self.code.append(&mut bytes);
         for _i in 0..instr_size {
@@ -140,6 +160,7 @@ impl Chunk {
             OP_GET_LOCAL => (2, Instruction::OpGetLocal(self.read_u8(index + 1))),
             OP_SET_LOCAL => (2, Instruction::OpSetLocal(self.read_u8(index + 1))),
             OP_JUMP_IF_FALSE => (3, Instruction::OpJumpIfFalse(self.read_u16(index + 1))),
+            OP_JUMP => (3, Instruction::OpJump(self.read_u16(index + 1))),
             OP_NEGATE => (1, Instruction::OpNegate),
             OP_ADD => (1, Instruction::OpAdd),
             OP_SUBTRACT => (1, Instruction::OpSubtract),

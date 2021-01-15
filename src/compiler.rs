@@ -339,8 +339,23 @@ impl<'a> Parser<'a> {
         self.consume(TokenKind::RightParen);
 
         let then_jump = self.emit_jump(Instruction::OpJumpIfFalse(u16::MAX), self.curr_line);
+
+        // pop the condition value first if we fall-through
+        self.emit_instruction(Instruction::OpPop, self.curr_line);
         self.statement();
+
+        let else_jump = self.emit_jump(Instruction::OpJump(u16::MAX), self.curr_line);
         self.patch_jump(then_jump);
+
+        // pop the condition value right after then-jump and before
+        // running else (this adds an implicit else doing just the pop
+        // if user has skipped the else)
+        self.emit_instruction(Instruction::OpPop, self.curr_line);
+
+        if self.consume_if(TokenKind::Else).is_some() {
+            self.statement();
+        }
+        self.patch_jump(else_jump);
     }
 
     fn block(&mut self) {

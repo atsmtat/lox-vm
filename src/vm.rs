@@ -183,6 +183,10 @@ impl<'a> Vm<'a> {
                     }
                 }
 
+                Instruction::OpJump(offset) => {
+                    self.ip += offset as usize;
+                }
+
                 Instruction::OpInvalid => {
                     let err_kind = ErrorKind::InternalError(VmError::InvalidOpCode);
                     return Err(self.runtime_error(err_kind));

@@ -42,8 +42,9 @@ impl<'a> Iterator for Disassembler<'a> {
                 Instruction::OpConstant(val_offset) => {
                     result.push_str(
                         format!(
-                            "OP_CONSTANT {:>16} {}",
-                            format!("{:04}", val_offset),
+                            "{:<20} {:04} {}",
+                            "OP_CONSTANT",
+                            val_offset,
                             self.get_constant(val_offset)
                         )
                         .as_str(),
@@ -52,8 +53,9 @@ impl<'a> Iterator for Disassembler<'a> {
                 Instruction::OpDefineGlobal(val_offset) => {
                     result.push_str(
                         format!(
-                            "OP_DEFINE_GLOBAL {:>11} {}",
-                            format!("{:04}", val_offset),
+                            "{:<20} {:04} {}",
+                            "OP_DEFINE_GLOBAL",
+                            val_offset,
                             self.get_constant(val_offset)
                         )
                         .as_str(),
@@ -62,8 +64,9 @@ impl<'a> Iterator for Disassembler<'a> {
                 Instruction::OpGetGlobal(val_offset) => {
                     result.push_str(
                         format!(
-                            "OP_GET_GLOBAL {:>14} {}",
-                            format!("{:04}", val_offset),
+                            "{:<20} {:04} {}",
+                            "OP_GET_GLOBAL",
+                            val_offset,
                             self.get_constant(val_offset)
                         )
                         .as_str(),
@@ -72,21 +75,41 @@ impl<'a> Iterator for Disassembler<'a> {
                 Instruction::OpSetGlobal(val_offset) => {
                     result.push_str(
                         format!(
-                            "OP_SET_GLOBAL {:>14} {}",
-                            format!("{:04}", val_offset),
+                            "{:<20} {:04} {}",
+                            "OP_SET_GLOBAL",
+                            val_offset,
                             self.get_constant(val_offset)
                         )
                         .as_str(),
                     );
                 }
                 Instruction::OpGetLocal(stack_slot) => {
-                    result.push_str(format!("OP_GET_LOCAL {:>14}", stack_slot).as_str());
+                    result.push_str(format!("{:<20} {:04}", "OP_GET_LOCAL", stack_slot).as_str());
                 }
                 Instruction::OpSetLocal(stack_slot) => {
-                    result.push_str(format!("OP_SET_LOCAL {:>14}", stack_slot).as_str());
+                    result.push_str(format!("{:<20} {:04}", "OP_SET_LOCAL", stack_slot).as_str());
                 }
-                Instruction::OpJumpIfFalse(offset) => {
-                    result.push_str(format!("OP_JUMP_IF_FALSE {:>14}", offset).as_str());
+                Instruction::OpJumpIfFalse(jump) => {
+                    result.push_str(
+                        format!(
+                            "{:<20} {:04} -> {:04}",
+                            "OP_JUMP_IF_FALSE",
+                            code_offset,
+                            code_offset + 3 + jump as usize
+                        )
+                        .as_str(),
+                    );
+                }
+                Instruction::OpJump(jump) => {
+                    result.push_str(
+                        format!(
+                            "{:<20} {:04} -> {:04}",
+                            "OP_JUMP",
+                            code_offset,
+                            code_offset + 3 + jump as usize
+                        )
+                        .as_str(),
+                    );
                 }
                 Instruction::OpNegate => result.push_str("OP_NEGATE"),
                 Instruction::OpAdd => result.push_str("OP_ADD"),
