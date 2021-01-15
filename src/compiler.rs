@@ -168,11 +168,15 @@ impl<'a> Parser<'a> {
 
     // === code emitters ===
     fn emit_instruction(&mut self, instr: Instruction, line: u32) {
-        self.chunk.add_instruction(instr, line);
+        self.chunk.push_instruction(instr, line);
+    }
+
+    fn emit_jump(&mut self, instr: Instruction, line: u32) -> usize {
+        self.chunk.push_instruction(instr, line)
     }
 
     fn emit_constant(&mut self, val: Value) -> u8 {
-        let const_ix = self.chunk.add_constant(val);
+        let const_ix = self.chunk.push_constant(val);
         if const_ix == u8::MAX - 1 {
             self.report_error(self.curr_line, "too many constants in one chunk");
         }
@@ -182,6 +186,16 @@ impl<'a> Parser<'a> {
     fn emit_identifier(&mut self, ident: String) -> u8 {
         let val = self.heap.allocate_string(ident);
         self.emit_constant(Value::String(val))
+    }
+
+    fn patch_jump(&mut self, instr_index: usize) {
+        // count the jump starting from end of the instruction, which
+        // is assumed to be of 3 bytes in size
+        let jump = self.chunk.code_len() - instr_index - 3;
+        if jump > u16::MAX as usize {
+            self.report_error(self.curr_line, "too much code to jump over");
+        }
+        self.chunk.patch_jump_offset(instr_index, jump as u16);
     }
 
     // === parsing methods ===
@@ -223,6 +237,10 @@ impl<'a> Parser<'a> {
                     self.begin_scope();
                     self.block();
                     self.end_scope();
+                }
+                TokenKind::If => {
+                    self.advance();
+                    self.if_statement();
                 }
                 _ => {
                     self.expr_statement();
@@ -313,6 +331,16 @@ impl<'a> Parser<'a> {
         self.expression();
         self.consume(TokenKind::Semicolon);
         self.emit_instruction(Instruction::OpPop, self.curr_line);
+    }
+
+    fn if_statement(&mut self) {
+        self.consume(TokenKind::LeftParen);
+        self.expression();
+        self.consume(TokenKind::RightParen);
+
+        let then_jump = self.emit_jump(Instruction::OpJumpIfFalse(u16::MAX), self.curr_line);
+        self.statement();
+        self.patch_jump(then_jump);
     }
 
     fn block(&mut self) {

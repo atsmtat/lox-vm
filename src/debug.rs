@@ -1,14 +1,14 @@
-use crate::chunk::{Chunk, Instruction, InstructionOffsetIter};
+use crate::chunk::{Chunk, Instruction, InstructionIter};
 
 struct Disassembler<'a> {
     chunk: &'a Chunk,
-    iter: std::iter::Enumerate<InstructionOffsetIter<'a>>,
+    iter: InstructionIter<'a>,
 }
 
 impl<'a> Disassembler<'a> {
     pub fn new(chunk: &'a Chunk) -> Self {
         Disassembler {
-            iter: chunk.iter().with_code_offset().enumerate(),
+            iter: chunk.iter(),
             chunk,
         }
     }
@@ -36,8 +36,8 @@ impl<'a> Iterator for Disassembler<'a> {
     type Item = String;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if let Some((instr_index, (code_offset, instr))) = self.iter.next() {
-            let mut result = format!("{:04} {} ", code_offset, self.get_line(instr_index));
+        if let Some((code_offset, instr)) = self.iter.next() {
+            let mut result = format!("{:04} {} ", code_offset, self.get_line(code_offset));
             match instr {
                 Instruction::OpConstant(val_offset) => {
                     result.push_str(
@@ -84,6 +84,9 @@ impl<'a> Iterator for Disassembler<'a> {
                 }
                 Instruction::OpSetLocal(stack_slot) => {
                     result.push_str(format!("OP_SET_LOCAL {:>14}", stack_slot).as_str());
+                }
+                Instruction::OpJumpIfFalse(offset) => {
+                    result.push_str(format!("OP_JUMP_IF_FALSE {:>14}", offset).as_str());
                 }
                 Instruction::OpNegate => result.push_str("OP_NEGATE"),
                 Instruction::OpAdd => result.push_str("OP_ADD"),

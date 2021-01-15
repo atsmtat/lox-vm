@@ -30,8 +30,8 @@ impl<'a> Vm<'a> {
     }
 
     pub fn run(&mut self) -> Result<(), RuntimeError> {
-        for (instr_index, instr) in self.chunk.iter().enumerate() {
-            self.ip = instr_index;
+        while self.ip < self.chunk.code_len() {
+            let (instr_size, instr) = self.chunk.read_instruction(self.ip);
             match instr {
                 Instruction::OpReturn => {
                     return Ok(());
@@ -176,11 +176,19 @@ impl<'a> Vm<'a> {
                     }
                 }
 
+                Instruction::OpJumpIfFalse(offset) => {
+                    let cond_val = self.peek()?;
+                    if cond_val.is_falsey() {
+                        self.ip += offset as usize;
+                    }
+                }
+
                 Instruction::OpInvalid => {
                     let err_kind = ErrorKind::InternalError(VmError::InvalidOpCode);
                     return Err(self.runtime_error(err_kind));
                 }
             }
+            self.ip += instr_size as usize;
         }
         Ok(())
     }

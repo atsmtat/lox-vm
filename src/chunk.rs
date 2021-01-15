@@ -1,4 +1,5 @@
 use crate::value::Value;
+use std::convert::TryInto;
 
 const OP_CONSTANT: u8 = 1;
 const OP_RETURN: u8 = 2;
@@ -21,6 +22,7 @@ const OP_GET_GLOBAL: u8 = 18;
 const OP_SET_GLOBAL: u8 = 19;
 const OP_GET_LOCAL: u8 = 20;
 const OP_SET_LOCAL: u8 = 21;
+const OP_JUMP_IF_FALSE: u8 = 22;
 
 const OP_INVALID: u8 = u8::MAX;
 
@@ -46,6 +48,7 @@ pub enum Instruction {
     OpSetGlobal(u8),
     OpGetLocal(u8),
     OpSetLocal(u8),
+    OpJumpIfFalse(u16),
     OpInvalid,
 }
 
@@ -73,6 +76,11 @@ impl From<Instruction> for Vec<u8> {
             Instruction::OpSetGlobal(offset) => vec![OP_SET_GLOBAL, offset],
             Instruction::OpGetLocal(offset) => vec![OP_GET_LOCAL, offset],
             Instruction::OpSetLocal(offset) => vec![OP_SET_LOCAL, offset],
+            Instruction::OpJumpIfFalse(offset) => vec![
+                OP_JUMP_IF_FALSE,
+                ((offset >> 8) & 0xff).try_into().unwrap(),
+                (offset & 0xff).try_into().unwrap(),
+            ],
             Instruction::OpInvalid => vec![OP_INVALID],
         }
     }
@@ -93,16 +101,68 @@ impl Chunk {
         }
     }
 
-    pub fn add_instruction(&mut self, instr: Instruction, line: u32) {
+    pub fn push_instruction(&mut self, instr: Instruction, line: u32) -> usize {
         let mut bytes: Vec<u8> = instr.into();
+        let instr_size = bytes.len();
         self.code.append(&mut bytes);
-        self.lines.push(line);
+        for _i in 0..instr_size {
+            self.lines.push(line);
+        }
+        self.code.len() - instr_size
     }
 
-    pub fn add_constant(&mut self, v: Value) -> u8 {
+    pub fn push_constant(&mut self, v: Value) -> u8 {
         let offset = self.constants.len();
         self.constants.push(v);
         offset as u8
+    }
+
+    pub fn code_len(&self) -> usize {
+        self.code.len()
+    }
+
+    fn read_u8(&self, index: usize) -> u8 {
+        self.code[index]
+    }
+
+    fn read_u16(&self, index: usize) -> u16 {
+        let upper8: u16 = self.read_u8(index) as u16;
+        let lower8 = self.read_u8(index + 1);
+        (upper8 << 8) | lower8 as u16
+    }
+
+    pub fn read_instruction(&self, index: usize) -> (u8, Instruction) {
+        match self.read_u8(index) {
+            OP_CONSTANT => (2, Instruction::OpConstant(self.read_u8(index + 1))),
+            OP_DEFINE_GLOBAL => (2, Instruction::OpDefineGlobal(self.read_u8(index + 1))),
+            OP_GET_GLOBAL => (2, Instruction::OpGetGlobal(self.read_u8(index + 1))),
+            OP_SET_GLOBAL => (2, Instruction::OpSetGlobal(self.read_u8(index + 1))),
+            OP_GET_LOCAL => (2, Instruction::OpGetLocal(self.read_u8(index + 1))),
+            OP_SET_LOCAL => (2, Instruction::OpSetLocal(self.read_u8(index + 1))),
+            OP_JUMP_IF_FALSE => (3, Instruction::OpJumpIfFalse(self.read_u16(index + 1))),
+            OP_NEGATE => (1, Instruction::OpNegate),
+            OP_ADD => (1, Instruction::OpAdd),
+            OP_SUBTRACT => (1, Instruction::OpSubtract),
+            OP_MULTIPLY => (1, Instruction::OpMultiply),
+            OP_DIVIDE => (1, Instruction::OpDivide),
+            OP_TRUE => (1, Instruction::OpTrue),
+            OP_FALSE => (1, Instruction::OpFalse),
+            OP_NIL => (1, Instruction::OpNil),
+            OP_NOT => (1, Instruction::OpNot),
+            OP_EQUAL => (1, Instruction::OpEqual),
+            OP_GREATER => (1, Instruction::OpGreater),
+            OP_LESS => (1, Instruction::OpLess),
+            OP_PRINT => (1, Instruction::OpPrint),
+            OP_POP => (1, Instruction::OpPop),
+            OP_RETURN => (1, Instruction::OpReturn),
+            _ => (1, Instruction::OpInvalid),
+        }
+    }
+
+    pub fn patch_jump_offset(&mut self, instr_ix: usize, offset: u16) {
+        // instr_ix points to op code
+        self.code[instr_ix + 1] = ((offset >> 8) & 0xff).try_into().unwrap();
+        self.code[instr_ix + 2] = (offset & 0xff).try_into().unwrap();
     }
 
     pub fn get_constant(&self, index: u8) -> Value {
@@ -118,124 +178,31 @@ impl Chunk {
     }
 
     pub fn iter(&self) -> InstructionIter {
-        InstructionIter::new(&self.code)
+        InstructionIter::new(&self)
     }
 }
 
 pub struct InstructionIter<'a> {
-    code_iter: std::slice::Iter<'a, u8>,
-    code_size: usize,
+    chunk: &'a Chunk,
+    ip: usize,
 }
 
 impl<'a> InstructionIter<'a> {
-    pub fn new(code: &'a [u8]) -> Self {
-        InstructionIter {
-            code_iter: code.iter(),
-            code_size: code.len(),
-        }
-    }
-
-    pub fn code_offset(&self) -> usize {
-        self.code_size - self.code_iter.len()
-    }
-
-    pub fn with_code_offset(self) -> InstructionOffsetIter<'a> {
-        InstructionOffsetIter::new(self)
+    pub fn new(chunk: &'a Chunk) -> Self {
+        InstructionIter { chunk, ip: 0 }
     }
 }
 
 impl<'a> Iterator for InstructionIter<'a> {
-    type Item = Instruction;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        let opcode = match self.code_iter.next() {
-            None => return None,
-            Some(b) => *b,
-        };
-
-        let instr = match opcode {
-            OP_CONSTANT => {
-                if let Some(offset) = self.code_iter.next() {
-                    Instruction::OpConstant(*offset)
-                } else {
-                    Instruction::OpInvalid
-                }
-            }
-            OP_DEFINE_GLOBAL => {
-                if let Some(offset) = self.code_iter.next() {
-                    Instruction::OpDefineGlobal(*offset)
-                } else {
-                    Instruction::OpInvalid
-                }
-            }
-            OP_GET_GLOBAL => {
-                if let Some(offset) = self.code_iter.next() {
-                    Instruction::OpGetGlobal(*offset)
-                } else {
-                    Instruction::OpInvalid
-                }
-            }
-            OP_SET_GLOBAL => {
-                if let Some(offset) = self.code_iter.next() {
-                    Instruction::OpSetGlobal(*offset)
-                } else {
-                    Instruction::OpInvalid
-                }
-            }
-            OP_GET_LOCAL => {
-                if let Some(offset) = self.code_iter.next() {
-                    Instruction::OpGetLocal(*offset)
-                } else {
-                    Instruction::OpInvalid
-                }
-            }
-            OP_SET_LOCAL => {
-                if let Some(offset) = self.code_iter.next() {
-                    Instruction::OpSetLocal(*offset)
-                } else {
-                    Instruction::OpInvalid
-                }
-            }
-            OP_NEGATE => Instruction::OpNegate,
-            OP_ADD => Instruction::OpAdd,
-            OP_SUBTRACT => Instruction::OpSubtract,
-            OP_MULTIPLY => Instruction::OpMultiply,
-            OP_DIVIDE => Instruction::OpDivide,
-            OP_TRUE => Instruction::OpTrue,
-            OP_FALSE => Instruction::OpFalse,
-            OP_NIL => Instruction::OpNil,
-            OP_NOT => Instruction::OpNot,
-            OP_EQUAL => Instruction::OpEqual,
-            OP_GREATER => Instruction::OpGreater,
-            OP_LESS => Instruction::OpLess,
-            OP_PRINT => Instruction::OpPrint,
-            OP_POP => Instruction::OpPop,
-            OP_RETURN => Instruction::OpReturn,
-            _ => Instruction::OpInvalid,
-        };
-        Some(instr)
-    }
-}
-
-pub struct InstructionOffsetIter<'a> {
-    instr_iter: InstructionIter<'a>,
-}
-
-impl<'a> InstructionOffsetIter<'a> {
-    pub fn new(instr_iter: InstructionIter<'a>) -> Self {
-        InstructionOffsetIter { instr_iter }
-    }
-}
-
-impl<'a> Iterator for InstructionOffsetIter<'a> {
     type Item = (usize, Instruction);
 
     fn next(&mut self) -> Option<Self::Item> {
-        let code_offset = self.instr_iter.code_offset();
-        if let Some(instr) = self.instr_iter.next() {
-            Some((code_offset, instr))
-        } else {
-            None
+        if self.ip >= self.chunk.code_len() {
+            return None;
         }
+        let (instr_size, instr) = self.chunk.read_instruction(self.ip);
+        let result = (self.ip, instr);
+        self.ip += instr_size as usize;
+        Some(result)
     }
 }
