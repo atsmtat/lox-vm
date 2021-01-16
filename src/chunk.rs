@@ -24,6 +24,7 @@ const OP_GET_LOCAL: u8 = 20;
 const OP_SET_LOCAL: u8 = 21;
 const OP_JUMP_IF_FALSE: u8 = 22;
 const OP_JUMP: u8 = 23;
+const OP_LOOP: u8 = 24;
 
 const OP_INVALID: u8 = u8::MAX;
 
@@ -51,6 +52,7 @@ pub enum Instruction {
     OpSetLocal(u8),
     OpJumpIfFalse(u16),
     OpJump(u16),
+    OpLoop(u16),
     OpInvalid,
 }
 
@@ -98,6 +100,11 @@ impl ByteCode for Instruction {
             }
             Instruction::OpJump(offset) => {
                 let mut res = vec![OP_JUMP];
+                res.append(&mut offset.encode());
+                res
+            }
+            Instruction::OpLoop(offset) => {
+                let mut res = vec![OP_LOOP];
                 res.append(&mut offset.encode());
                 res
             }
@@ -161,6 +168,7 @@ impl Chunk {
             OP_SET_LOCAL => (2, Instruction::OpSetLocal(self.read_u8(index + 1))),
             OP_JUMP_IF_FALSE => (3, Instruction::OpJumpIfFalse(self.read_u16(index + 1))),
             OP_JUMP => (3, Instruction::OpJump(self.read_u16(index + 1))),
+            OP_LOOP => (3, Instruction::OpLoop(self.read_u16(index + 1))),
             OP_NEGATE => (1, Instruction::OpNegate),
             OP_ADD => (1, Instruction::OpAdd),
             OP_SUBTRACT => (1, Instruction::OpSubtract),

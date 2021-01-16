@@ -194,6 +194,20 @@ impl<'a> Parser<'a> {
         self.chunk.patch_jump_offset(instr_index, jump as u16);
     }
 
+    fn emit_loop(&mut self, target_index: usize) {
+        let jump = self.chunk.code_len() - target_index + 3;
+
+        if jump > u16::MAX as usize {
+            self.report_error(self.curr_line, "loop body too large");
+        }
+
+        self.emit_instruction(Instruction::OpLoop(jump as u16), self.curr_line);
+    }
+
+    fn next_instr_index(&self) -> usize {
+        self.chunk.code_len()
+    }
+
     // === parsing methods ===
     fn program(&mut self) {
         while !self.is_eof() {
@@ -237,6 +251,10 @@ impl<'a> Parser<'a> {
                 TokenKind::If => {
                     self.advance();
                     self.if_statement();
+                }
+                TokenKind::While => {
+                    self.advance();
+                    self.while_statement();
                 }
                 _ => {
                     self.expr_statement();
@@ -352,6 +370,24 @@ impl<'a> Parser<'a> {
             self.statement();
         }
         self.patch_jump(else_jump);
+    }
+
+    fn while_statement(&mut self) {
+        self.consume(TokenKind::LeftParen);
+        let cond_start = self.next_instr_index();
+        self.expression();
+        self.consume(TokenKind::RightParen);
+
+        let end_jump = self.emit_jump(Instruction::OpJumpIfFalse(u16::MAX), self.curr_line);
+
+        // pop the condition value first if we fall-through
+        self.emit_instruction(Instruction::OpPop, self.curr_line);
+        self.statement();
+        self.emit_loop(cond_start);
+
+        self.patch_jump(end_jump);
+        // pop the condition value before continuing
+        self.emit_instruction(Instruction::OpPop, self.curr_line);
     }
 
     fn block(&mut self) {

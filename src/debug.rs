@@ -111,6 +111,17 @@ impl<'a> Iterator for Disassembler<'a> {
                         .as_str(),
                     );
                 }
+                Instruction::OpLoop(jump) => {
+                    result.push_str(
+                        format!(
+                            "{:<20} {:04} -> {:04}",
+                            "OP_LOOP",
+                            code_offset,
+                            code_offset + 3 - jump as usize
+                        )
+                        .as_str(),
+                    );
+                }
                 Instruction::OpNegate => result.push_str("OP_NEGATE"),
                 Instruction::OpAdd => result.push_str("OP_ADD"),
                 Instruction::OpSubtract => result.push_str("OP_SUBTRACT"),
