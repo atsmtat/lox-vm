@@ -32,10 +32,6 @@ impl<'a> Local<'a> {
         }
     }
 
-    pub fn mark_init(&mut self) {
-        self.initialized = true;
-    }
-
     pub fn var_name(&self) -> &str {
         self.name_token.lexeme
     }
@@ -494,6 +490,29 @@ impl<'a> Parser<'a> {
         }
     }
 
+    fn and(&mut self, tok: Token<'a>, _: bool) {
+        let end_jump = self.emit_jump(Instruction::OpJumpIfFalse(u16::MAX), tok.line);
+
+        self.emit_instruction(Instruction::OpPop, tok.line);
+        let my_prec = self.infix_prec(tok.kind);
+        self.parse_precedence(my_prec as i32 + 1);
+
+        self.patch_jump(end_jump);
+    }
+
+    fn or(&mut self, tok: Token<'a>, _: bool) {
+        let else_jump = self.emit_jump(Instruction::OpJumpIfFalse(u16::MAX), tok.line);
+        let end_jump = self.emit_jump(Instruction::OpJump(u16::MAX), tok.line);
+
+        self.patch_jump(else_jump);
+        self.emit_instruction(Instruction::OpPop, tok.line);
+
+        let my_prec = self.infix_prec(tok.kind);
+        self.parse_precedence(my_prec as i32 + 1);
+
+        self.patch_jump(end_jump);
+    }
+
     fn parse_precedence(&mut self, prec: i32) {
         let tok = self.advance();
         if tok.is_none() {
@@ -559,6 +578,8 @@ impl<'a> Parser<'a> {
             TokenKind::GreaterEqual => Precedence::Comparison,
             TokenKind::Less => Precedence::Comparison,
             TokenKind::LessEqual => Precedence::Comparison,
+            TokenKind::And => Precedence::And,
+            TokenKind::Or => Precedence::Or,
             _ => Precedence::None,
         }
     }
@@ -575,6 +596,8 @@ impl<'a> Parser<'a> {
             TokenKind::GreaterEqual => Some(Self::binary),
             TokenKind::Less => Some(Self::binary),
             TokenKind::LessEqual => Some(Self::binary),
+            TokenKind::And => Some(Self::and),
+            TokenKind::Or => Some(Self::or),
             _ => None,
         }
     }
