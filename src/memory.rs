@@ -1,15 +1,79 @@
+use crate::object::StrObj;
 use fnv::FnvHashSet;
-use std::borrow::Borrow;
-use std::cmp::{Eq, PartialEq};
 use std::fmt;
-use std::hash::{Hash, Hasher};
 use std::ops::Deref;
 use std::ptr::NonNull;
 
-pub trait Object {}
+pub trait Trace {}
+
+pub struct Gc<T: Trace + 'static> {
+    ptr: NonNull<GcBox<T>>,
+}
+
+impl<T: Trace> Gc<T> {
+    pub fn ptr_eq(&self, other: &Self) -> bool {
+        self.ptr == other.ptr
+    }
+}
+
+impl<T: Trace> Copy for Gc<T> {}
+
+impl<T: Trace> Clone for Gc<T> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+impl<T: Trace> Deref for Gc<T> {
+    type Target = T;
+    fn deref(&self) -> &T {
+        unsafe { (*self.ptr.as_ptr()).value() }
+    }
+}
+
+impl<T: Trace + fmt::Debug> fmt::Debug for Gc<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_fmt(format_args!("{:?}", self.deref()))
+    }
+}
+
+impl<T: Trace + fmt::Display> fmt::Display for Gc<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_fmt(format_args!("{}", self.deref()))
+    }
+}
+
+struct GcBoxHeader {
+    next: Option<NonNull<GcBox<dyn Trace>>>,
+    marked: bool,
+}
+
+struct GcBox<T: Trace + ?Sized + 'static> {
+    header: GcBoxHeader,
+    value: T,
+}
+
+impl<T: Trace> GcBox<T> {
+    fn new(value: T) -> NonNull<Self> {
+        let gc_box = Box::into_raw(Box::new(GcBox {
+            header: GcBoxHeader {
+                next: None,
+                marked: false,
+            },
+            value: value,
+        }));
+        unsafe { NonNull::new_unchecked(gc_box) }
+    }
+}
+
+impl<T: Trace + ?Sized> GcBox<T> {
+    fn value(&self) -> &T {
+        &self.value
+    }
+}
 
 pub struct Heap {
-    head: Option<NonNull<GcBox<dyn Object>>>,
+    head: Option<NonNull<GcBox<dyn Trace>>>,
     interned_str: FnvHashSet<Gc<StrObj>>,
 }
 
@@ -21,7 +85,7 @@ impl Heap {
         }
     }
 
-    pub fn allocate<T: Object>(&mut self, val: T) -> Gc<T> {
+    pub fn allocate<T: Trace>(&mut self, val: T) -> Gc<T> {
         // allocate the box
         let gc_box = GcBox::new(val);
         match self.head {
@@ -92,86 +156,5 @@ impl Heap {
 impl Drop for Heap {
     fn drop(&mut self) {
         self.sweep();
-    }
-}
-
-pub struct Gc<T: Object + 'static> {
-    ptr: NonNull<GcBox<T>>,
-}
-
-impl<T: Object> Copy for Gc<T> {}
-
-impl<T: Object> Clone for Gc<T> {
-    fn clone(&self) -> Self {
-        *self
-    }
-}
-
-impl<T: Object> Deref for Gc<T> {
-    type Target = T;
-    fn deref(&self) -> &T {
-        unsafe { (*self.ptr.as_ptr()).value() }
-    }
-}
-
-impl<T: Object + fmt::Debug> fmt::Debug for Gc<T> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_fmt(format_args!("{:?}", self.deref()))
-    }
-}
-
-struct GcBoxHeader {
-    next: Option<NonNull<GcBox<dyn Object>>>,
-    marked: bool,
-}
-
-struct GcBox<T: Object + ?Sized + 'static> {
-    header: GcBoxHeader,
-    value: T,
-}
-
-impl<T: Object> GcBox<T> {
-    fn new(value: T) -> NonNull<Self> {
-        let gc_box = Box::into_raw(Box::new(GcBox {
-            header: GcBoxHeader {
-                next: None,
-                marked: false,
-            },
-            value: value,
-        }));
-        unsafe { NonNull::new_unchecked(gc_box) }
-    }
-}
-
-impl<T: Object + ?Sized> GcBox<T> {
-    fn value(&self) -> &T {
-        &self.value
-    }
-}
-
-#[derive(Debug)]
-pub struct StrObj(pub String);
-
-impl Object for StrObj {}
-
-// Since all strings are interned, string equality is same as StrObj box pointer
-// equality.
-impl PartialEq for Gc<StrObj> {
-    fn eq(&self, other: &Gc<StrObj>) -> bool {
-        self.ptr == other.ptr
-    }
-}
-
-impl Eq for Gc<StrObj> {}
-
-impl Hash for Gc<StrObj> {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.0.hash(state);
-    }
-}
-
-impl Borrow<String> for Gc<StrObj> {
-    fn borrow(&self) -> &String {
-        &self.0
     }
 }

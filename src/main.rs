@@ -3,6 +3,7 @@ mod compiler;
 mod debug;
 mod error;
 mod memory;
+mod object;
 mod scanner;
 mod value;
 mod vm;
@@ -10,10 +11,9 @@ mod vm;
 use std::io::{self, BufRead, Write};
 
 fn interpret(source: &str) {
-    let mut chunk = chunk::Chunk::new();
     let mut heap = memory::Heap::new();
-    if let Some(()) = compiler::compile(&source, &mut chunk, &mut heap) {
-        let mut vm = vm::Vm::new(&chunk, &mut heap);
+    if let Some(script_fn) = compiler::compile(&source, &mut heap) {
+        let mut vm = vm::Vm::new(&script_fn.chunk, &mut heap);
         vm.run().unwrap_or_else(|err| {
             eprintln!("{}", err);
         });

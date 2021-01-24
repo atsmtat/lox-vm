@@ -1,6 +1,7 @@
 use crate::chunk::{Chunk, Instruction};
 use crate::error::{ErrorKind, RuntimeError, VmError};
-use crate::memory::{Gc, Heap, StrObj};
+use crate::memory::{Gc, Heap};
+use crate::object::StrObj;
 use crate::value::Value;
 use fnv::FnvHashMap;
 

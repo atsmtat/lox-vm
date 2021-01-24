@@ -1,17 +1,19 @@
 use crate::chunk::{Chunk, Instruction};
 use crate::debug;
 use crate::memory::Heap;
+use crate::object::FnObj;
 use crate::scanner::{Scanner, ScannerError, Token, TokenKind};
 use crate::value::Value;
 
-pub fn compile(source: &str, chunk: &mut Chunk, heap: &mut Heap) -> Option<()> {
+pub fn compile(source: &str, heap: &mut Heap) -> Option<FnObj> {
     let scanner = Scanner::new(source);
-    let mut parser = Parser::new(scanner, chunk, heap);
+    let mut script_fn = FnObj::new(0, heap.allocate_string("<script>".to_string()));
+    let mut parser = Parser::new(scanner, heap, &mut script_fn);
     if parser.parse() {
         if cfg!(debug_assertions) {
-            debug::disassemble_chunk(chunk, "code");
+            debug::disassemble_chunk(&script_fn.chunk, "code");
         }
-        Some(())
+        Some(script_fn)
     } else {
         None
     }
@@ -93,8 +95,8 @@ impl<'a> CompilerState<'a> {
 
 struct Parser<'a> {
     scanner: std::iter::Peekable<Scanner<'a>>,
-    chunk: &'a mut Chunk,
     heap: &'a mut Heap,
+    function: &'a mut FnObj,
     had_error: bool,
     panic_mode: bool,
     curr_line: u32,
@@ -119,11 +121,11 @@ enum Precedence {
 type Parselet<'a> = fn(&mut Parser<'a>, Token<'a>, bool);
 
 impl<'a> Parser<'a> {
-    pub fn new(scanner: Scanner<'a>, chunk: &'a mut Chunk, heap: &'a mut Heap) -> Self {
+    pub fn new(scanner: Scanner<'a>, heap: &'a mut Heap, function: &'a mut FnObj) -> Self {
         Parser {
             scanner: scanner.peekable(),
-            chunk,
             heap,
+            function,
             had_error: false,
             panic_mode: false,
             curr_line: 0,
@@ -137,6 +139,14 @@ impl<'a> Parser<'a> {
             self.emit_instruction(Instruction::OpReturn, self.curr_line);
         }
         !self.had_error
+    }
+
+    fn chunk_mut(&mut self) -> &mut Chunk {
+        &mut self.function.chunk
+    }
+
+    fn chunk(&self) -> &Chunk {
+        &self.function.chunk
     }
 
     // === compiler state management ===
@@ -164,15 +174,15 @@ impl<'a> Parser<'a> {
 
     // === code emitters ===
     fn emit_instruction(&mut self, instr: Instruction, line: u32) {
-        self.chunk.push_instruction(instr, line);
+        self.chunk_mut().push_instruction(instr, line);
     }
 
     fn emit_jump(&mut self, instr: Instruction, line: u32) -> usize {
-        self.chunk.push_instruction(instr, line)
+        self.chunk_mut().push_instruction(instr, line)
     }
 
     fn emit_constant(&mut self, val: Value) -> u8 {
-        let const_ix = self.chunk.push_constant(val);
+        let const_ix = self.chunk_mut().push_constant(val);
         if const_ix == u8::MAX - 1 {
             self.report_error(self.curr_line, "too many constants in one chunk");
         }
@@ -187,15 +197,15 @@ impl<'a> Parser<'a> {
     fn patch_jump(&mut self, instr_index: usize) {
         // count the jump starting from end of the instruction, which
         // is assumed to be of 3 bytes in size
-        let jump = self.chunk.code_len() - instr_index - 3;
+        let jump = self.chunk_mut().code_len() - instr_index - 3;
         if jump > u16::MAX as usize {
             self.report_error(self.curr_line, "too much code to jump over");
         }
-        self.chunk.patch_jump_offset(instr_index, jump as u16);
+        self.chunk_mut().patch_jump_offset(instr_index, jump as u16);
     }
 
     fn emit_loop(&mut self, target_index: usize) {
-        let jump = self.chunk.code_len() - target_index + 3;
+        let jump = self.chunk_mut().code_len() - target_index + 3;
 
         if jump > u16::MAX as usize {
             self.report_error(self.curr_line, "loop body too large");
@@ -205,7 +215,7 @@ impl<'a> Parser<'a> {
     }
 
     fn next_instr_index(&self) -> usize {
-        self.chunk.code_len()
+        self.chunk().code_len()
     }
 
     // === parsing methods ===
