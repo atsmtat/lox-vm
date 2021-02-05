@@ -1,9 +1,18 @@
 use crate::chunk::Instruction;
 use crate::error::{ErrorKind, RuntimeError, StackFrame, VmError};
 use crate::memory::{Gc, Heap};
-use crate::object::{FnObj, StrObj};
+use crate::object::{FnObj, NativeFn, NativeObj, StrObj};
 use crate::value::Value;
 use fnv::FnvHashMap;
+use std::time::SystemTime;
+
+// native function
+fn clock() -> Value {
+    let duration = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .unwrap();
+    Value::Double(duration.as_secs() as f64)
+}
 
 const FRAMES_MAX: usize = 64;
 const STACK_MAX: usize = FRAMES_MAX * u8::MAX as usize;
@@ -37,6 +46,7 @@ impl<'a> Vm<'a> {
         });
 
         vm.push(Value::Function(script_fn));
+        vm.define_native("clock".to_string(), clock);
         vm
     }
 
@@ -288,6 +298,7 @@ impl<'a> Vm<'a> {
     fn call_value(&mut self, val: Value, arg_count: u8) -> Result<(), RuntimeError> {
         match val {
             Value::Function(fn_obj) => self.call(fn_obj, arg_count),
+            Value::Native(native_obj) => Ok(self.call_native(native_obj)),
             _ => Err(self.runtime_error(ErrorKind::NonCallable(val))),
         }
     }
@@ -309,6 +320,18 @@ impl<'a> Vm<'a> {
             return Err(self.runtime_error(ErrorKind::StackOverflow));
         }
         Ok(())
+    }
+
+    fn call_native(&mut self, native: Gc<NativeObj>) {
+        let result = (native.function)();
+        self.stack.push(result);
+    }
+
+    // === Native function FFI ===
+    fn define_native(&mut self, name: String, native: NativeFn) {
+        let native_name = self.heap.allocate_string(name);
+        let native_obj = self.heap.allocate(NativeObj::new(native));
+        self.globals.insert(native_name, Value::Native(native_obj));
     }
 
     // === Error reporting ===

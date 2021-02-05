@@ -1,5 +1,5 @@
 use crate::memory::Gc;
-use crate::object::{FnObj, StrObj};
+use crate::object::{FnObj, NativeObj, StrObj};
 use std::cmp::PartialEq;
 use std::fmt;
 
@@ -10,6 +10,7 @@ pub enum Value {
     Nil,
     String(Gc<StrObj>),
     Function(Gc<FnObj>),
+    Native(Gc<NativeObj>),
 }
 
 impl Value {
@@ -30,6 +31,7 @@ impl fmt::Display for Value {
             Value::Nil => f.write_str("nil"),
             Value::String(gc_str) => f.write_fmt(format_args!("{}", &gc_str)),
             Value::Function(gc_fn) => f.write_fmt(format_args!("{}", &gc_fn)),
+            Value::Native(gc_nat) => f.write_fmt(format_args!("{}", &gc_nat)),
         }
     }
 }
@@ -53,7 +55,7 @@ impl PartialEq for Value {
                 Value::String(rstr) => lstr == rstr,
                 _ => false,
             },
-            Value::Function(_) => false,
+            _ => false,
         }
     }
 }

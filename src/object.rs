@@ -1,5 +1,6 @@
 use crate::chunk::Chunk;
 use crate::memory::{Gc, Trace};
+use crate::value::Value;
 use std::borrow;
 use std::cmp;
 use std::fmt;
@@ -76,3 +77,26 @@ impl fmt::Display for FnObj {
 }
 
 impl Trace for FnObj {}
+
+// === NativeObj ===
+
+pub type NativeFn = fn() -> Value;
+
+#[derive(Debug)]
+pub struct NativeObj {
+    pub function: NativeFn,
+}
+
+impl NativeObj {
+    pub fn new(function: NativeFn) -> Self {
+        NativeObj { function }
+    }
+}
+
+impl fmt::Display for NativeObj {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("<native fn>")
+    }
+}
+
+impl Trace for NativeObj {}
