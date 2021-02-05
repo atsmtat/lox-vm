@@ -1,17 +1,16 @@
 use crate::chunk::{Chunk, Instruction};
 use crate::debug;
-use crate::memory::Heap;
-use crate::object::FnObj;
+use crate::memory::{Gc, Heap};
+use crate::object::{FnObj, StrObj};
 use crate::scanner::{Scanner, ScannerError, Token, TokenKind};
 use crate::value::Value;
 
-pub fn compile(source: &str, heap: &mut Heap) -> Option<FnObj> {
+pub fn compile(source: &str, heap: &mut Heap) -> Option<Gc<FnObj>> {
     let scanner = Scanner::new(source);
-    let mut script_fn = FnObj::new(0, heap.allocate_string("<script>".to_string()));
-    let mut parser = Parser::new(scanner, heap, &mut script_fn);
-    if parser.parse() {
+    let mut parser = Parser::new(scanner, heap);
+    if let Some(script_fn) = parser.parse() {
         if cfg!(debug_assertions) {
-            debug::disassemble_chunk(&script_fn.chunk, "code");
+            debug::disassemble_chunk(&script_fn.chunk, "script");
         }
         Some(script_fn)
     } else {
@@ -39,9 +38,18 @@ impl<'a> Local<'a> {
     }
 }
 
-struct CompilerState<'a> {
+enum FunKind {
+    Script,
+    Function,
+}
+
+struct FunState<'a> {
+    name: Gc<StrObj>,
+    arity: u8,
     locals: Vec<Local<'a>>,
     scope_depth: usize,
+    chunk: Chunk,
+    kind: FunKind,
 }
 
 enum LookupError {
@@ -49,12 +57,20 @@ enum LookupError {
     ResolvedUninit,
 }
 
-impl<'a> CompilerState<'a> {
-    fn new() -> Self {
-        CompilerState {
+impl<'a> FunState<'a> {
+    fn new(name: Gc<StrObj>, kind: FunKind) -> Self {
+        let mut fns = FunState {
+            name,
+            arity: 0,
             locals: Vec::new(),
             scope_depth: 0,
-        }
+            chunk: Chunk::new(),
+            kind,
+        };
+
+        // reserve local slot 0 for the function value itself
+        fns.add_local(Token::new(TokenKind::Identifier, "", 0));
+        fns
     }
 
     fn in_global_scope(&self) -> bool {
@@ -96,11 +112,10 @@ impl<'a> CompilerState<'a> {
 struct Parser<'a> {
     scanner: std::iter::Peekable<Scanner<'a>>,
     heap: &'a mut Heap,
-    function: &'a mut FnObj,
     had_error: bool,
     panic_mode: bool,
     curr_line: u32,
-    compiler_state: CompilerState<'a>,
+    fun_states: Vec<FunState<'a>>,
 }
 
 #[derive(Copy, Clone)]
@@ -118,47 +133,63 @@ enum Precedence {
     Primary,
 }
 
+enum VarKind {
+    Local(String),
+    Global { name: String, offset: u8, line: u32 },
+}
+
 type Parselet<'a> = fn(&mut Parser<'a>, Token<'a>, bool);
 
 impl<'a> Parser<'a> {
-    pub fn new(scanner: Scanner<'a>, heap: &'a mut Heap, function: &'a mut FnObj) -> Self {
+    pub fn new(scanner: Scanner<'a>, heap: &'a mut Heap) -> Self {
         Parser {
             scanner: scanner.peekable(),
             heap,
-            function,
             had_error: false,
             panic_mode: false,
             curr_line: 0,
-            compiler_state: CompilerState::new(),
+            fun_states: Vec::new(),
         }
     }
 
-    pub fn parse(&mut self) -> bool {
+    pub fn parse(&mut self) -> Option<Gc<FnObj>> {
+        let script_name = self.heap.allocate_string("<script>".to_string());
+        self.fun_states
+            .push(FunState::new(script_name, FunKind::Script));
+
         self.program();
+
         if !self.had_error {
-            self.emit_instruction(Instruction::OpReturn, self.curr_line);
+            self.emit_return(false);
+            return Some(self.end_fun());
         }
-        !self.had_error
+        None
     }
 
-    fn chunk_mut(&mut self) -> &mut Chunk {
-        &mut self.function.chunk
+    fn end_fun(&mut self) -> Gc<FnObj> {
+        let fun = self.fun_states.pop().expect("no function to end");
+        let fn_obj = FnObj::new(fun.chunk, fun.arity, fun.name);
+        self.heap.allocate(fn_obj)
     }
 
-    fn chunk(&self) -> &Chunk {
-        &self.function.chunk
+    // === function state management ===
+    fn fun(&self) -> &FunState {
+        self.fun_states.last().expect("empty function stack")
     }
 
-    // === compiler state management ===
+    fn fun_mut(&mut self) -> &mut FunState<'a> {
+        self.fun_states.last_mut().expect("empty function stack")
+    }
+
     fn begin_scope(&mut self) {
-        self.compiler_state.scope_depth += 1;
+        self.fun_mut().scope_depth += 1;
     }
 
     fn end_scope(&mut self) {
-        self.compiler_state.scope_depth -= 1;
-        let curr_depth = self.compiler_state.scope_depth;
+        self.fun_mut().scope_depth -= 1;
+        let curr_depth = self.fun().scope_depth;
         let mut drop_count = self
-            .compiler_state
+            .fun()
             .locals
             .iter()
             .rev()
@@ -166,7 +197,7 @@ impl<'a> Parser<'a> {
             .count();
 
         while drop_count > 0 {
-            self.compiler_state.locals.pop();
+            self.fun_mut().locals.pop();
             self.emit_instruction(Instruction::OpPop, self.curr_line);
             drop_count -= 1;
         }
@@ -174,15 +205,15 @@ impl<'a> Parser<'a> {
 
     // === code emitters ===
     fn emit_instruction(&mut self, instr: Instruction, line: u32) {
-        self.chunk_mut().push_instruction(instr, line);
+        self.fun_mut().chunk.push_instruction(instr, line);
     }
 
     fn emit_jump(&mut self, instr: Instruction, line: u32) -> usize {
-        self.chunk_mut().push_instruction(instr, line)
+        self.fun_mut().chunk.push_instruction(instr, line)
     }
 
     fn emit_constant(&mut self, val: Value) -> u8 {
-        let const_ix = self.chunk_mut().push_constant(val);
+        let const_ix = self.fun_mut().chunk.push_constant(val);
         if const_ix == u8::MAX - 1 {
             self.report_error(self.curr_line, "too many constants in one chunk");
         }
@@ -197,15 +228,17 @@ impl<'a> Parser<'a> {
     fn patch_jump(&mut self, instr_index: usize) {
         // count the jump starting from end of the instruction, which
         // is assumed to be of 3 bytes in size
-        let jump = self.chunk_mut().code_len() - instr_index - 3;
+        let jump = self.next_instr_index() - instr_index - 3;
         if jump > u16::MAX as usize {
             self.report_error(self.curr_line, "too much code to jump over");
         }
-        self.chunk_mut().patch_jump_offset(instr_index, jump as u16);
+        self.fun_mut()
+            .chunk
+            .patch_jump_offset(instr_index, jump as u16);
     }
 
     fn emit_loop(&mut self, target_index: usize) {
-        let jump = self.chunk_mut().code_len() - target_index + 3;
+        let jump = self.next_instr_index() - target_index + 3;
 
         if jump > u16::MAX as usize {
             self.report_error(self.curr_line, "loop body too large");
@@ -214,8 +247,15 @@ impl<'a> Parser<'a> {
         self.emit_instruction(Instruction::OpLoop(jump as u16), self.curr_line);
     }
 
+    fn emit_return(&mut self, ret_nil: bool) {
+        if ret_nil {
+            self.emit_instruction(Instruction::OpNil, self.curr_line);
+        }
+        self.emit_instruction(Instruction::OpReturn, self.curr_line);
+    }
+
     fn next_instr_index(&self) -> usize {
-        self.chunk().code_len()
+        self.fun().chunk.code_len()
     }
 
     // === parsing methods ===
@@ -231,6 +271,10 @@ impl<'a> Parser<'a> {
     fn declaration(&mut self) {
         match self.peek() {
             Some(tok) => match tok.kind {
+                TokenKind::Fun => {
+                    self.advance();
+                    self.fun_decl();
+                }
                 TokenKind::Var => {
                     self.advance();
                     self.var_decl();
@@ -257,6 +301,7 @@ impl<'a> Parser<'a> {
                     self.begin_scope();
                     self.block();
                     self.end_scope();
+                    self.consume(TokenKind::RightBrace);
                 }
                 TokenKind::If => {
                     self.advance();
@@ -265,6 +310,10 @@ impl<'a> Parser<'a> {
                 TokenKind::While => {
                     self.advance();
                     self.while_statement();
+                }
+                TokenKind::Return => {
+                    self.advance();
+                    self.return_statement();
                 }
                 _ => {
                     self.expr_statement();
@@ -275,17 +324,10 @@ impl<'a> Parser<'a> {
     }
 
     fn var_decl(&mut self) {
-        let ident_tok = self.consume(TokenKind::Identifier);
-        if ident_tok.is_none() {
-            return;
-        }
-        let ident_tok = ident_tok.unwrap();
+        // first, declare a variable
+        let var_kind = self.parse_var();
 
-        if !self.compiler_state.in_global_scope() {
-            // declare local variable
-            self.declare_local_var(ident_tok.clone());
-        }
-
+        // compile initializer expression, so that initialer value is at the top of the stack
         if let Some(tok) = self.peek() {
             match tok.kind {
                 TokenKind::Equal => {
@@ -295,54 +337,166 @@ impl<'a> Parser<'a> {
                 _ => {
                     // if initializer expression is missing, assign
                     // nil as the initial value.
-                    self.emit_instruction(Instruction::OpNil, ident_tok.line);
+                    self.emit_instruction(Instruction::OpNil, self.curr_line);
                 }
             }
         }
         self.consume(TokenKind::Semicolon);
 
         // define variable
-        if self.compiler_state.in_global_scope() {
-            // global variable
-            let var_name = ident_tok.lexeme.to_string();
-            let var_line = ident_tok.line;
-            // store variable name in constant table
-            let offset = self.emit_identifier(var_name);
-            self.emit_instruction(Instruction::OpDefineGlobal(offset), var_line);
-        } else {
-            // local variable
-            self.compiler_state.init_last_local();
+        match var_kind {
+            VarKind::Global {
+                name: _,
+                offset,
+                line,
+            } => {
+                self.emit_instruction(Instruction::OpDefineGlobal(offset), line);
+            }
+            VarKind::Local(_) => {
+                self.fun_mut().init_last_local();
+            }
         }
     }
 
-    fn declare_local_var(&mut self, var_tok: Token<'a>) {
-        let line = var_tok.line;
-
-        if self.compiler_state.locals_count() == (u8::MAX - 1) as usize {
-            self.report_error(line, "too many local variables in function");
+    fn parse_var(&mut self) -> VarKind {
+        let ident_tok = self.consume(TokenKind::Identifier);
+        if ident_tok.is_none() {
+            return VarKind::Local("".to_string());
         }
+        let ident_tok = ident_tok.unwrap();
 
-        let var_name = var_tok.lexeme;
-        let curr_depth = self.compiler_state.scope_depth;
-        let dup_var = self
-            .compiler_state
-            .locals
-            .iter()
-            .rev()
-            .take_while(|loc| curr_depth == loc.depth)
-            .any(|loc| var_name == loc.var_name());
+        if !self.fun().in_global_scope() {
+            // declare local variable
+            let line = ident_tok.line;
 
-        if dup_var {
-            self.report_error(
+            if self.fun().locals_count() == (u8::MAX - 1) as usize {
+                self.report_error(line, "too many local variables in function");
+            }
+
+            // check if name conflicts with other declaration in the same scope.
+            let var_name = ident_tok.lexeme;
+            let curr_depth = self.fun().scope_depth;
+            let dup_var = self
+                .fun()
+                .locals
+                .iter()
+                .rev()
+                .take_while(|loc| curr_depth == loc.depth)
+                .any(|loc| var_name == loc.var_name());
+
+            if dup_var {
+                self.report_error(
+                    line,
+                    &format!(
+                        "variable with name {} already exists in this scope.",
+                        var_name
+                    ),
+                );
+            }
+
+            self.fun_mut().add_local(ident_tok.clone());
+            VarKind::Local(var_name.to_string())
+        } else {
+            // global variable
+            let var_name = ident_tok.lexeme.to_string();
+            let line = ident_tok.line;
+            // store variable name in constant table
+            let offset = self.emit_identifier(var_name.clone());
+            VarKind::Global {
+                name: var_name,
+                offset,
                 line,
-                &format!(
-                    "variable with name {} already exists in this scope.",
-                    var_name
-                ),
-            );
+            }
+        }
+    }
+
+    fn fun_decl(&mut self) {
+        let var_kind = self.parse_var();
+        // mark local function as initialized to allow recursive calls
+        match &var_kind {
+            VarKind::Local(_) => {
+                self.fun_mut().init_last_local();
+            }
+            _ => {}
         }
 
-        self.compiler_state.add_local(var_tok.clone());
+        let fun_name = match &var_kind {
+            VarKind::Local(name) => name,
+            VarKind::Global {
+                name,
+                offset: _,
+                line: _,
+            } => name,
+        };
+
+        let fn_obj = self.function(fun_name.to_string());
+        // store FnObj in constant table, and emit instruction to load it on the stack.
+        let offset = self.emit_constant(Value::Function(fn_obj));
+        self.emit_instruction(Instruction::OpConstant(offset), self.curr_line);
+
+        // define function
+        match var_kind {
+            VarKind::Global {
+                name: _,
+                offset,
+                line,
+            } => {
+                self.emit_instruction(Instruction::OpDefineGlobal(offset), line);
+            }
+            VarKind::Local(_) => {}
+        }
+    }
+
+    fn function(&mut self, name: String) -> Gc<FnObj> {
+        let fun_name = self.heap.allocate_string(name);
+        self.fun_states
+            .push(FunState::new(fun_name, FunKind::Function));
+        self.begin_scope();
+
+        self.consume(TokenKind::LeftParen);
+        // params
+        let mut arity = 0_u8;
+        while let Some(tok) = self.peek() {
+            match tok.kind {
+                TokenKind::RightParen => break,
+                _ => {
+                    arity += 1;
+                    if arity >= u8::MAX {
+                        self.report_error(self.curr_line, "can't have more than 255 parameters");
+                    }
+                    self.parse_var();
+                    self.fun_mut().init_last_local();
+                }
+            }
+            if self.consume_if(TokenKind::Comma).is_none() {
+                break;
+            }
+        }
+        self.consume(TokenKind::RightParen);
+
+        self.fun_mut().arity = arity;
+
+        // body
+        self.consume(TokenKind::LeftBrace);
+        self.block();
+        self.consume(TokenKind::RightBrace);
+
+        self.emit_return(true);
+        self.end_fun()
+    }
+
+    fn return_statement(&mut self) {
+        if let FunKind::Script = self.fun().kind {
+            self.report_error(self.curr_line, "can't return from top-level code");
+        }
+
+        if self.consume_if(TokenKind::Semicolon).is_some() {
+            self.emit_return(true);
+        } else {
+            self.expression();
+            self.consume(TokenKind::Semicolon);
+            self.emit_return(false);
+        }
     }
 
     fn print_statement(&mut self) {
@@ -407,7 +561,6 @@ impl<'a> Parser<'a> {
             }
             self.declaration();
         }
-        self.consume(TokenKind::RightBrace);
     }
 
     fn expression(&mut self) {
@@ -435,7 +588,7 @@ impl<'a> Parser<'a> {
         let var_name = tok.lexeme.to_string();
         let is_assign = can_assign && self.consume_if(TokenKind::Equal).is_some();
 
-        match self.compiler_state.resolve_local(&var_name) {
+        match self.fun().resolve_local(&var_name) {
             Ok(offset) => {
                 // found a local variable
                 if is_assign {
@@ -484,6 +637,27 @@ impl<'a> Parser<'a> {
                 self.report_error(tok.line, "invalid literal");
             }
         }
+    }
+
+    fn call(&mut self, tok: Token<'a>, _: bool) {
+        let mut arg_count = 0;
+        while let Some(tok) = self.peek() {
+            match tok.kind {
+                TokenKind::RightParen => break,
+                _ => {
+                    self.expression();
+                    arg_count += 1;
+                    if arg_count >= u8::MAX {
+                        self.report_error(self.curr_line, "can't have more than 255 arguments");
+                    }
+                }
+            }
+            if self.consume_if(TokenKind::Comma).is_none() {
+                break;
+            }
+        }
+        self.consume(TokenKind::RightParen);
+        self.emit_instruction(Instruction::OpCall(arg_count), tok.line);
     }
 
     fn grouping(&mut self, _: Token<'a>, _: bool) {
@@ -614,6 +788,7 @@ impl<'a> Parser<'a> {
 
     fn infix_prec(&self, tok_kind: TokenKind) -> Precedence {
         match tok_kind {
+            TokenKind::LeftParen => Precedence::Call,
             TokenKind::Minus => Precedence::Term,
             TokenKind::Plus => Precedence::Term,
             TokenKind::Star => Precedence::Factor,
@@ -632,6 +807,7 @@ impl<'a> Parser<'a> {
 
     fn infix_rule(&self, tok_kind: TokenKind) -> Option<Parselet<'a>> {
         match tok_kind {
+            TokenKind::LeftParen => Some(Self::call),
             TokenKind::Minus => Some(Self::binary),
             TokenKind::Plus => Some(Self::binary),
             TokenKind::Star => Some(Self::binary),

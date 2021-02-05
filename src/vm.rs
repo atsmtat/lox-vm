@@ -1,43 +1,99 @@
-use crate::chunk::{Chunk, Instruction};
-use crate::error::{ErrorKind, RuntimeError, VmError};
+use crate::chunk::Instruction;
+use crate::error::{ErrorKind, RuntimeError, StackFrame, VmError};
 use crate::memory::{Gc, Heap};
-use crate::object::StrObj;
+use crate::object::{FnObj, StrObj};
 use crate::value::Value;
 use fnv::FnvHashMap;
 
-const STACK_MAX: usize = 256;
+const FRAMES_MAX: usize = 64;
+const STACK_MAX: usize = FRAMES_MAX * u8::MAX as usize;
+
+struct CallFrame {
+    function: Gc<FnObj>,
+    frame_ptr: usize,
+    ip: usize,
+}
 
 pub struct Vm<'a> {
-    chunk: &'a Chunk,
+    call_frames: Vec<CallFrame>,
     stack: Vec<Value>,
-    ip: usize,
     heap: &'a mut Heap,
     globals: FnvHashMap<Gc<StrObj>, Value>,
 }
 
 impl<'a> Vm<'a> {
-    pub fn new(chunk: &'a Chunk, heap: &'a mut Heap) -> Self {
-        Vm {
-            chunk,
+    pub fn new(script_fn: Gc<FnObj>, heap: &'a mut Heap) -> Self {
+        let mut vm = Vm {
+            call_frames: Vec::with_capacity(FRAMES_MAX),
             stack: Vec::with_capacity(STACK_MAX),
-            ip: 0,
             heap: heap,
             globals: FnvHashMap::default(),
+        };
+
+        vm.call_frames.push(CallFrame {
+            function: script_fn,
+            frame_ptr: 0,
+            ip: 0,
+        });
+
+        vm.push(Value::Function(script_fn));
+        vm
+    }
+
+    fn call_frame(&self) -> &CallFrame {
+        self.call_frames.last().expect("empty call frames stack")
+    }
+
+    fn call_frame_mut(&mut self) -> &mut CallFrame {
+        self.call_frames
+            .last_mut()
+            .expect("empty call frames stack")
+    }
+
+    fn stack_frame(&self) -> &[Value] {
+        let fp = self.call_frame().frame_ptr;
+        &self.stack[fp..]
+    }
+
+    fn stack_frame_mut(&mut self) -> &mut [Value] {
+        let fp = self.call_frame().frame_ptr;
+        &mut self.stack[fp..]
+    }
+
+    fn move_ip_fwd(&mut self, steps: usize) {
+        let ip = &mut self.call_frame_mut().ip;
+        *ip += steps;
+    }
+
+    fn move_ip_back(&mut self, steps: usize) {
+        let ip = &mut self.call_frame_mut().ip;
+        *ip -= steps;
+    }
+
+    fn next_instruction(&self) -> (u8, Instruction) {
+        let ip = self.call_frame().ip;
+        self.call_frame().function.chunk.read_instruction(ip)
+    }
+
+    fn get_chunk_constant(&self, offset: u8) -> Value {
+        self.call_frame().function.chunk.get_constant(offset)
+    }
+
+    fn get_chunk_variable(&self, offset: u8) -> Result<Gc<StrObj>, RuntimeError> {
+        let ident = self.get_chunk_constant(offset);
+        match ident {
+            Value::String(ident_str) => Ok(ident_str),
+            _ => {
+                let err_kind = ErrorKind::InternalError(VmError::UnexpectedValue(ident));
+                Err(self.runtime_error(err_kind))
+            }
         }
     }
 
-    fn runtime_error(&self, kind: ErrorKind) -> RuntimeError {
-        RuntimeError::new(self.chunk.get_line(self.ip), kind)
-    }
-
     pub fn run(&mut self) -> Result<(), RuntimeError> {
-        while self.ip < self.chunk.code_len() {
-            let (instr_size, instr) = self.chunk.read_instruction(self.ip);
+        loop {
+            let (instr_size, instr) = self.next_instruction();
             match instr {
-                Instruction::OpReturn => {
-                    return Ok(());
-                }
-
                 Instruction::OpPop => {
                     self.pop()?;
                 }
@@ -115,18 +171,18 @@ impl<'a> Vm<'a> {
                 Instruction::OpNil => self.push(Value::Nil),
 
                 Instruction::OpConstant(val_offset) => {
-                    let val = self.chunk.get_constant(val_offset);
+                    let val = self.get_chunk_constant(val_offset);
                     self.push(val);
                 }
 
                 Instruction::OpDefineGlobal(val_offset) => {
-                    let var_name = self.get_variable_at(val_offset)?;
+                    let var_name = self.get_chunk_variable(val_offset)?;
                     let init_val = self.pop()?;
                     self.globals.insert(var_name, init_val);
                 }
 
                 Instruction::OpGetGlobal(val_offset) => {
-                    let var_name = self.get_variable_at(val_offset)?;
+                    let var_name = self.get_chunk_variable(val_offset)?;
                     match self.globals.get(&var_name) {
                         Some(val) => {
                             let result = *val;
@@ -140,7 +196,7 @@ impl<'a> Vm<'a> {
                 }
 
                 Instruction::OpSetGlobal(val_offset) => {
-                    let var_name = self.get_variable_at(val_offset)?;
+                    let var_name = self.get_chunk_variable(val_offset)?;
                     let new_val = self.peek()?;
                     match self.globals.get_mut(&var_name) {
                         Some(val) => {
@@ -153,20 +209,22 @@ impl<'a> Vm<'a> {
                     }
                 }
 
-                Instruction::OpGetLocal(stack_ix) => match self.stack.get(stack_ix as usize) {
-                    Some(val) => {
-                        let result = *val;
-                        self.push(result);
+                Instruction::OpGetLocal(stack_ix) => {
+                    match self.stack_frame().get(stack_ix as usize) {
+                        Some(val) => {
+                            let result = *val;
+                            self.push(result);
+                        }
+                        None => {
+                            let err_kind = ErrorKind::InternalError(VmError::EmptyStackPop);
+                            return Err(self.runtime_error(err_kind));
+                        }
                     }
-                    None => {
-                        let err_kind = ErrorKind::InternalError(VmError::EmptyStackPop);
-                        return Err(self.runtime_error(err_kind));
-                    }
-                },
+                }
 
                 Instruction::OpSetLocal(stack_ix) => {
                     let new_val = self.peek()?;
-                    match self.stack.get_mut(stack_ix as usize) {
+                    match self.stack_frame_mut().get_mut(stack_ix as usize) {
                         Some(val) => {
                             *val = new_val;
                         }
@@ -180,28 +238,97 @@ impl<'a> Vm<'a> {
                 Instruction::OpJumpIfFalse(offset) => {
                     let cond_val = self.peek()?;
                     if cond_val.is_falsey() {
-                        self.ip += offset as usize;
+                        self.move_ip_fwd(offset as usize);
                     }
                 }
 
                 Instruction::OpJump(offset) => {
-                    self.ip += offset as usize;
+                    self.move_ip_fwd(offset as usize);
                 }
 
                 Instruction::OpLoop(offset) => {
-                    self.ip -= offset as usize;
+                    self.move_ip_back(offset as usize);
                 }
 
                 Instruction::OpInvalid => {
                     let err_kind = ErrorKind::InternalError(VmError::InvalidOpCode);
                     return Err(self.runtime_error(err_kind));
                 }
+
+                Instruction::OpCall(args) => {
+                    self.move_ip_fwd(instr_size as usize);
+                    self.call_value(self.peek_nth(args as usize)?, args)?;
+                    continue;
+                }
+
+                Instruction::OpReturn => {
+                    let result = self.pop()?;
+                    let frame = self.call_frames.pop().ok_or_else(|| {
+                        self.runtime_error(ErrorKind::InternalError(VmError::EmptyStackPop))
+                    })?;
+
+                    if self.call_frames.is_empty() {
+                        // returning from top-level script function.
+                        // terminate the interpreter successfully.
+                        return Ok(());
+                    }
+
+                    // drop the frame from the stack.
+                    self.stack.truncate(frame.frame_ptr);
+
+                    // push the return value on the stack, in the caller's frame.
+                    self.stack.push(result);
+                    continue;
+                }
             }
-            self.ip += instr_size as usize;
+            self.move_ip_fwd(instr_size as usize);
+        }
+    }
+
+    fn call_value(&mut self, val: Value, arg_count: u8) -> Result<(), RuntimeError> {
+        match val {
+            Value::Function(fn_obj) => self.call(fn_obj, arg_count),
+            _ => Err(self.runtime_error(ErrorKind::NonCallable(val))),
+        }
+    }
+
+    fn call(&mut self, fun: Gc<FnObj>, arg_count: u8) -> Result<(), RuntimeError> {
+        let exp_args = fun.arity();
+        if arg_count != exp_args {
+            return Err(self.runtime_error(ErrorKind::MismatchArgCount(exp_args, arg_count)));
+        }
+
+        let fp = self.stack.len() - arg_count as usize - 1;
+        self.call_frames.push(CallFrame {
+            function: fun,
+            frame_ptr: fp,
+            ip: 0,
+        });
+
+        if self.call_frames.len() == FRAMES_MAX {
+            return Err(self.runtime_error(ErrorKind::StackOverflow));
         }
         Ok(())
     }
 
+    // === Error reporting ===
+    fn runtime_error(&self, kind: ErrorKind) -> RuntimeError {
+        let ip = self.call_frame().ip;
+        let chunk = &self.call_frame().function.chunk;
+        RuntimeError::new(chunk.get_line(ip), kind, self.stack_trace())
+    }
+
+    fn stack_trace(&self) -> Vec<StackFrame> {
+        let mut trace = Vec::new();
+        for frame in self.call_frames.iter().rev() {
+            let chunk = &frame.function.chunk;
+            let line = chunk.get_line(frame.ip);
+            trace.push(StackFrame::new(line, frame.function.name()));
+        }
+        trace
+    }
+
+    // === Stack APIs ===
     fn push(&mut self, val: Value) {
         self.stack.push(val);
     }
@@ -214,8 +341,16 @@ impl<'a> Vm<'a> {
         }
     }
 
-    fn peek(&mut self) -> Result<Value, RuntimeError> {
+    fn peek(&self) -> Result<Value, RuntimeError> {
         if let Some(val) = self.stack.last() {
+            Ok(*val)
+        } else {
+            Err(self.runtime_error(ErrorKind::InternalError(VmError::EmptyStackPop)))
+        }
+    }
+
+    fn peek_nth(&self, offset: usize) -> Result<Value, RuntimeError> {
+        if let Some(val) = self.stack.iter().rev().nth(offset) {
             Ok(*val)
         } else {
             Err(self.runtime_error(ErrorKind::InternalError(VmError::EmptyStackPop)))
@@ -227,17 +362,6 @@ impl<'a> Vm<'a> {
         match val {
             Value::Double(v) => Ok(v),
             _ => Err(self.runtime_error(ErrorKind::InvalidOperand(val))),
-        }
-    }
-
-    fn get_variable_at(&self, offset: u8) -> Result<Gc<StrObj>, RuntimeError> {
-        let ident = self.chunk.get_constant(offset);
-        match ident {
-            Value::String(ident_str) => Ok(ident_str),
-            _ => {
-                let err_kind = ErrorKind::InternalError(VmError::UnexpectedValue(ident));
-                Err(self.runtime_error(err_kind))
-            }
         }
     }
 

@@ -1,3 +1,5 @@
+use crate::memory::Gc;
+use crate::object::FnObj;
 use crate::value::Value;
 use std::convert::TryInto;
 
@@ -25,6 +27,7 @@ const OP_SET_LOCAL: u8 = 21;
 const OP_JUMP_IF_FALSE: u8 = 22;
 const OP_JUMP: u8 = 23;
 const OP_LOOP: u8 = 24;
+const OP_CALL: u8 = 25;
 
 const OP_INVALID: u8 = u8::MAX;
 
@@ -45,6 +48,7 @@ pub enum Instruction {
     OpPrint,
     OpPop,
     OpReturn,
+    OpCall(u8),
     OpDefineGlobal(u8),
     OpGetGlobal(u8),
     OpSetGlobal(u8),
@@ -88,6 +92,7 @@ impl ByteCode for Instruction {
             Instruction::OpLess => vec![OP_LESS],
             Instruction::OpPrint => vec![OP_PRINT],
             Instruction::OpPop => vec![OP_POP],
+            Instruction::OpCall(args) => vec![OP_CALL, args],
             Instruction::OpDefineGlobal(offset) => vec![OP_DEFINE_GLOBAL, offset],
             Instruction::OpGetGlobal(offset) => vec![OP_GET_GLOBAL, offset],
             Instruction::OpSetGlobal(offset) => vec![OP_SET_GLOBAL, offset],
@@ -161,6 +166,7 @@ impl Chunk {
     pub fn read_instruction(&self, index: usize) -> (u8, Instruction) {
         match self.read_u8(index) {
             OP_CONSTANT => (2, Instruction::OpConstant(self.read_u8(index + 1))),
+            OP_CALL => (2, Instruction::OpCall(self.read_u8(index + 1))),
             OP_DEFINE_GLOBAL => (2, Instruction::OpDefineGlobal(self.read_u8(index + 1))),
             OP_GET_GLOBAL => (2, Instruction::OpGetGlobal(self.read_u8(index + 1))),
             OP_SET_GLOBAL => (2, Instruction::OpSetGlobal(self.read_u8(index + 1))),
@@ -209,6 +215,10 @@ impl Chunk {
     pub fn iter(&self) -> InstructionIter {
         InstructionIter::new(&self)
     }
+
+    pub fn fun_iter(&self) -> FunIter {
+        FunIter::new(&self)
+    }
 }
 
 pub struct InstructionIter<'a> {
@@ -233,5 +243,35 @@ impl<'a> Iterator for InstructionIter<'a> {
         let result = (self.ip, instr);
         self.ip += instr_size as usize;
         Some(result)
+    }
+}
+
+pub struct FunIter<'a> {
+    const_iter: std::slice::Iter<'a, Value>,
+}
+
+impl<'a> FunIter<'a> {
+    fn new(chunk: &'a Chunk) -> Self {
+        FunIter {
+            const_iter: chunk.constants.iter(),
+        }
+    }
+}
+
+impl<'a> Iterator for FunIter<'a> {
+    type Item = Gc<FnObj>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        while let Some(val) = self.const_iter.next() {
+            match val {
+                Value::Function(fn_obj) => {
+                    return Some(*fn_obj);
+                }
+                _ => {
+                    continue;
+                }
+            }
+        }
+        return None;
     }
 }

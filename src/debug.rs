@@ -122,6 +122,9 @@ impl<'a> Iterator for Disassembler<'a> {
                         .as_str(),
                     );
                 }
+                Instruction::OpCall(args) => {
+                    result.push_str(format!("{:<20} {:04}", "OP_CALL", args).as_str());
+                }
                 Instruction::OpNegate => result.push_str("OP_NEGATE"),
                 Instruction::OpAdd => result.push_str("OP_ADD"),
                 Instruction::OpSubtract => result.push_str("OP_SUBTRACT"),
@@ -151,5 +154,10 @@ pub fn disassemble_chunk(chunk: &Chunk, name: &str) {
     let disassembler = Disassembler::new(chunk);
     for instr_str in disassembler {
         println!("{}", instr_str);
+    }
+
+    for fun in chunk.fun_iter() {
+        println!("");
+        disassemble_chunk(&fun.chunk, &fun.name().0)
     }
 }

@@ -47,16 +47,16 @@ pub struct FnObj {
 }
 
 impl FnObj {
-    pub fn new(arity: u8, name: Gc<StrObj>) -> Self {
-        FnObj {
-            chunk: Chunk::new(),
-            arity,
-            name,
-        }
+    pub fn new(chunk: Chunk, arity: u8, name: Gc<StrObj>) -> Self {
+        FnObj { chunk, arity, name }
     }
 
     pub fn name(&self) -> Gc<StrObj> {
         self.name
+    }
+
+    pub fn arity(&self) -> u8 {
+        self.arity
     }
 }
 
