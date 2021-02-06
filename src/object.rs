@@ -79,7 +79,6 @@ impl fmt::Display for FnObj {
 impl Trace for FnObj {}
 
 // === NativeObj ===
-
 pub type NativeFn = fn() -> Value;
 
 #[derive(Debug)]
@@ -100,3 +99,23 @@ impl fmt::Display for NativeObj {
 }
 
 impl Trace for NativeObj {}
+
+// === ClosureObj ===
+#[derive(Debug)]
+pub struct ClosureObj {
+    pub function: Gc<FnObj>,
+}
+
+impl ClosureObj {
+    pub fn new(function: Gc<FnObj>) -> Self {
+        ClosureObj { function }
+    }
+}
+
+impl fmt::Display for ClosureObj {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_fmt(format_args!("{}", &self.function))
+    }
+}
+
+impl Trace for ClosureObj {}

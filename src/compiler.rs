@@ -432,7 +432,7 @@ impl<'a> Parser<'a> {
         let fn_obj = self.function(fun_name.to_string());
         // store FnObj in constant table, and emit instruction to load it on the stack.
         let offset = self.emit_constant(Value::Function(fn_obj));
-        self.emit_instruction(Instruction::OpConstant(offset), self.curr_line);
+        self.emit_instruction(Instruction::OpClosure(offset), self.curr_line);
 
         // define function
         match var_kind {

@@ -28,6 +28,7 @@ const OP_JUMP_IF_FALSE: u8 = 22;
 const OP_JUMP: u8 = 23;
 const OP_LOOP: u8 = 24;
 const OP_CALL: u8 = 25;
+const OP_CLOSURE: u8 = 26;
 
 const OP_INVALID: u8 = u8::MAX;
 
@@ -49,6 +50,7 @@ pub enum Instruction {
     OpPop,
     OpReturn,
     OpCall(u8),
+    OpClosure(u8),
     OpDefineGlobal(u8),
     OpGetGlobal(u8),
     OpSetGlobal(u8),
@@ -93,6 +95,7 @@ impl ByteCode for Instruction {
             Instruction::OpPrint => vec![OP_PRINT],
             Instruction::OpPop => vec![OP_POP],
             Instruction::OpCall(args) => vec![OP_CALL, args],
+            Instruction::OpClosure(offset) => vec![OP_CLOSURE, offset],
             Instruction::OpDefineGlobal(offset) => vec![OP_DEFINE_GLOBAL, offset],
             Instruction::OpGetGlobal(offset) => vec![OP_GET_GLOBAL, offset],
             Instruction::OpSetGlobal(offset) => vec![OP_SET_GLOBAL, offset],
@@ -167,6 +170,7 @@ impl Chunk {
         match self.read_u8(index) {
             OP_CONSTANT => (2, Instruction::OpConstant(self.read_u8(index + 1))),
             OP_CALL => (2, Instruction::OpCall(self.read_u8(index + 1))),
+            OP_CLOSURE => (2, Instruction::OpClosure(self.read_u8(index + 1))),
             OP_DEFINE_GLOBAL => (2, Instruction::OpDefineGlobal(self.read_u8(index + 1))),
             OP_GET_GLOBAL => (2, Instruction::OpGetGlobal(self.read_u8(index + 1))),
             OP_SET_GLOBAL => (2, Instruction::OpSetGlobal(self.read_u8(index + 1))),

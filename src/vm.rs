@@ -1,7 +1,7 @@
 use crate::chunk::Instruction;
 use crate::error::{ErrorKind, RuntimeError, StackFrame, VmError};
 use crate::memory::{Gc, Heap};
-use crate::object::{FnObj, NativeFn, NativeObj, StrObj};
+use crate::object::{ClosureObj, FnObj, NativeFn, NativeObj, StrObj};
 use crate::value::Value;
 use fnv::FnvHashMap;
 use std::time::SystemTime;
@@ -18,7 +18,7 @@ const FRAMES_MAX: usize = 64;
 const STACK_MAX: usize = FRAMES_MAX * u8::MAX as usize;
 
 struct CallFrame {
-    function: Gc<FnObj>,
+    closure: Gc<ClosureObj>,
     frame_ptr: usize,
     ip: usize,
 }
@@ -39,13 +39,18 @@ impl<'a> Vm<'a> {
             globals: FnvHashMap::default(),
         };
 
+        vm.push(Value::Function(script_fn));
+
+        let closure = vm.heap.allocate(ClosureObj::new(script_fn));
         vm.call_frames.push(CallFrame {
-            function: script_fn,
+            closure,
             frame_ptr: 0,
             ip: 0,
         });
 
-        vm.push(Value::Function(script_fn));
+        vm.pop().unwrap();
+        vm.push(Value::Closure(closure));
+
         vm.define_native("clock".to_string(), clock);
         vm
     }
@@ -82,11 +87,19 @@ impl<'a> Vm<'a> {
 
     fn next_instruction(&self) -> (u8, Instruction) {
         let ip = self.call_frame().ip;
-        self.call_frame().function.chunk.read_instruction(ip)
+        self.call_frame()
+            .closure
+            .function
+            .chunk
+            .read_instruction(ip)
     }
 
     fn get_chunk_constant(&self, offset: u8) -> Value {
-        self.call_frame().function.chunk.get_constant(offset)
+        self.call_frame()
+            .closure
+            .function
+            .chunk
+            .get_constant(offset)
     }
 
     fn get_chunk_variable(&self, offset: u8) -> Result<Gc<StrObj>, RuntimeError> {
@@ -260,10 +273,16 @@ impl<'a> Vm<'a> {
                     self.move_ip_back(offset as usize);
                 }
 
-                Instruction::OpInvalid => {
-                    let err_kind = ErrorKind::InternalError(VmError::InvalidOpCode);
-                    return Err(self.runtime_error(err_kind));
-                }
+                Instruction::OpClosure(val_offset) => match self.get_chunk_constant(val_offset) {
+                    Value::Function(fn_obj) => {
+                        let closure = self.heap.allocate(ClosureObj::new(fn_obj));
+                        self.push(Value::Closure(closure));
+                    }
+                    _ => {
+                        let err_kind = ErrorKind::InternalError(VmError::InvalidOpCode);
+                        return Err(self.runtime_error(err_kind));
+                    }
+                },
 
                 Instruction::OpCall(args) => {
                     self.move_ip_fwd(instr_size as usize);
@@ -290,6 +309,11 @@ impl<'a> Vm<'a> {
                     self.stack.push(result);
                     continue;
                 }
+
+                Instruction::OpInvalid => {
+                    let err_kind = ErrorKind::InternalError(VmError::InvalidOpCode);
+                    return Err(self.runtime_error(err_kind));
+                }
             }
             self.move_ip_fwd(instr_size as usize);
         }
@@ -297,21 +321,21 @@ impl<'a> Vm<'a> {
 
     fn call_value(&mut self, val: Value, arg_count: u8) -> Result<(), RuntimeError> {
         match val {
-            Value::Function(fn_obj) => self.call(fn_obj, arg_count),
+            Value::Closure(clos_obj) => self.call(clos_obj, arg_count),
             Value::Native(native_obj) => Ok(self.call_native(native_obj)),
             _ => Err(self.runtime_error(ErrorKind::NonCallable(val))),
         }
     }
 
-    fn call(&mut self, fun: Gc<FnObj>, arg_count: u8) -> Result<(), RuntimeError> {
-        let exp_args = fun.arity();
+    fn call(&mut self, closure: Gc<ClosureObj>, arg_count: u8) -> Result<(), RuntimeError> {
+        let exp_args = closure.function.arity();
         if arg_count != exp_args {
             return Err(self.runtime_error(ErrorKind::MismatchArgCount(exp_args, arg_count)));
         }
 
         let fp = self.stack.len() - arg_count as usize - 1;
         self.call_frames.push(CallFrame {
-            function: fun,
+            closure,
             frame_ptr: fp,
             ip: 0,
         });
@@ -337,16 +361,16 @@ impl<'a> Vm<'a> {
     // === Error reporting ===
     fn runtime_error(&self, kind: ErrorKind) -> RuntimeError {
         let ip = self.call_frame().ip;
-        let chunk = &self.call_frame().function.chunk;
+        let chunk = &self.call_frame().closure.function.chunk;
         RuntimeError::new(chunk.get_line(ip), kind, self.stack_trace())
     }
 
     fn stack_trace(&self) -> Vec<StackFrame> {
         let mut trace = Vec::new();
         for frame in self.call_frames.iter().rev() {
-            let chunk = &frame.function.chunk;
+            let chunk = &frame.closure.function.chunk;
             let line = chunk.get_line(frame.ip);
-            trace.push(StackFrame::new(line, frame.function.name()));
+            trace.push(StackFrame::new(line, frame.closure.function.name()));
         }
         trace
     }
