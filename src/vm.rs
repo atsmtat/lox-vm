@@ -1,9 +1,10 @@
 use crate::chunk::Instruction;
 use crate::error::{ErrorKind, RuntimeError, StackFrame, VmError};
 use crate::memory::{Gc, Heap};
-use crate::object::{ClosureObj, FnObj, NativeFn, NativeObj, StrObj};
+use crate::object::{Capture, ClosureObj, FnObj, NativeFn, NativeObj, StrObj, UpvalueObj};
 use crate::value::Value;
 use fnv::FnvHashMap;
+use std::collections::BTreeMap;
 use std::time::SystemTime;
 
 // native function
@@ -28,6 +29,7 @@ pub struct Vm<'a> {
     stack: Vec<Value>,
     heap: &'a mut Heap,
     globals: FnvHashMap<Gc<StrObj>, Value>,
+    open_upvalues: BTreeMap<usize, Gc<UpvalueObj>>,
 }
 
 impl<'a> Vm<'a> {
@@ -37,6 +39,7 @@ impl<'a> Vm<'a> {
             stack: Vec::with_capacity(STACK_MAX),
             heap: heap,
             globals: FnvHashMap::default(),
+            open_upvalues: BTreeMap::new(),
         };
 
         vm.push(Value::Function(script_fn));
@@ -258,6 +261,33 @@ impl<'a> Vm<'a> {
                     }
                 }
 
+                Instruction::OpGetUpval(upval_slot) => {
+                    let upval =
+                        self.call_frame().closure.captured_upvals.borrow()[upval_slot as usize];
+                    let val = match *upval.capture.borrow() {
+                        Capture::Open(stack_abs_slot) => self.stack[stack_abs_slot],
+                        Capture::Closed(val) => val,
+                    };
+                    self.push(val);
+                }
+
+                Instruction::OpSetUpval(upval_slot) => {
+                    let new_val = self.peek()?;
+                    let upval =
+                        self.call_frame().closure.captured_upvals.borrow()[upval_slot as usize];
+
+                    let new_capture = match *upval.capture.borrow() {
+                        Capture::Open(stack_abs_slot) => {
+                            if let Some(val) = self.stack.get_mut(stack_abs_slot) {
+                                *val = new_val;
+                            }
+                            Capture::Open(stack_abs_slot)
+                        }
+                        Capture::Closed(_) => Capture::Closed(new_val),
+                    };
+                    upval.capture.replace(new_capture);
+                }
+
                 Instruction::OpJumpIfFalse(offset) => {
                     let cond_val = self.peek()?;
                     if cond_val.is_falsey() {
@@ -284,6 +314,43 @@ impl<'a> Vm<'a> {
                     }
                 },
 
+                Instruction::OpCaptureLocal(stack_slot) => match self.peek()? {
+                    Value::Closure(closure) => {
+                        let stack_abs_ix = self.call_frame().frame_ptr + stack_slot as usize;
+                        let upval = match self.open_upvalues.get(&stack_abs_ix) {
+                            Some(open_upval) => *open_upval,
+                            None => {
+                                let capture = Capture::Open(stack_abs_ix);
+                                let new_upval = self.heap.allocate(UpvalueObj::new(capture));
+                                self.open_upvalues.insert(stack_abs_ix, new_upval);
+                                new_upval
+                            }
+                        };
+                        closure.captured_upvals.borrow_mut().push(upval);
+                    }
+                    _ => {
+                        let err_kind = ErrorKind::InternalError(VmError::InvalidOpCode);
+                        return Err(self.runtime_error(err_kind));
+                    }
+                },
+
+                Instruction::OpCaptureUpval(upval_slot) => match self.peek()? {
+                    Value::Closure(closure) => {
+                        let upval = self.call_frame_mut().closure.captured_upvals.borrow()
+                            [upval_slot as usize];
+                        closure.captured_upvals.borrow_mut().push(upval);
+                    }
+                    _ => {
+                        let err_kind = ErrorKind::InternalError(VmError::InvalidOpCode);
+                        return Err(self.runtime_error(err_kind));
+                    }
+                },
+
+                Instruction::OpCloseUpval => {
+                    self.close_upvalues_till(self.stack.len() - 1);
+                    self.pop()?;
+                }
+
                 Instruction::OpCall(args) => {
                     self.move_ip_fwd(instr_size as usize);
                     self.call_value(self.peek_nth(args as usize)?, args)?;
@@ -292,6 +359,8 @@ impl<'a> Vm<'a> {
 
                 Instruction::OpReturn => {
                     let result = self.pop()?;
+                    self.close_upvalues_till(self.call_frame().frame_ptr);
+
                     let frame = self.call_frames.pop().ok_or_else(|| {
                         self.runtime_error(ErrorKind::InternalError(VmError::EmptyStackPop))
                     })?;
@@ -349,6 +418,24 @@ impl<'a> Vm<'a> {
     fn call_native(&mut self, native: Gc<NativeObj>) {
         let result = (native.function)();
         self.stack.push(result);
+    }
+
+    fn close_upvalues_till(&mut self, lowest: usize) {
+        let mut close_keys = Vec::new();
+        for (key, _) in self
+            .open_upvalues
+            .iter()
+            .rev()
+            .take_while(|(k, _v)| **k >= lowest)
+        {
+            close_keys.push(*key);
+        }
+
+        for key in close_keys {
+            let upval = self.open_upvalues.remove(&key).unwrap();
+            let closing_val = self.stack[key];
+            upval.capture.replace(Capture::Closed(closing_val));
+        }
     }
 
     // === Native function FFI ===

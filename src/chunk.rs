@@ -29,6 +29,11 @@ const OP_JUMP: u8 = 23;
 const OP_LOOP: u8 = 24;
 const OP_CALL: u8 = 25;
 const OP_CLOSURE: u8 = 26;
+const OP_CAPTURE_LOCAL: u8 = 27;
+const OP_CAPTURE_UPVAL: u8 = 28;
+const OP_GET_UPVAL: u8 = 29;
+const OP_SET_UPVAL: u8 = 30;
+const OP_CLOSE_UPVAL: u8 = 31;
 
 const OP_INVALID: u8 = u8::MAX;
 
@@ -51,11 +56,16 @@ pub enum Instruction {
     OpReturn,
     OpCall(u8),
     OpClosure(u8),
+    OpCaptureLocal(u8),
+    OpCaptureUpval(u8),
     OpDefineGlobal(u8),
     OpGetGlobal(u8),
     OpSetGlobal(u8),
     OpGetLocal(u8),
     OpSetLocal(u8),
+    OpGetUpval(u8),
+    OpSetUpval(u8),
+    OpCloseUpval,
     OpJumpIfFalse(u16),
     OpJump(u16),
     OpLoop(u16),
@@ -96,11 +106,16 @@ impl ByteCode for Instruction {
             Instruction::OpPop => vec![OP_POP],
             Instruction::OpCall(args) => vec![OP_CALL, args],
             Instruction::OpClosure(offset) => vec![OP_CLOSURE, offset],
+            Instruction::OpCaptureLocal(offset) => vec![OP_CAPTURE_LOCAL, offset],
+            Instruction::OpCaptureUpval(offset) => vec![OP_CAPTURE_UPVAL, offset],
             Instruction::OpDefineGlobal(offset) => vec![OP_DEFINE_GLOBAL, offset],
             Instruction::OpGetGlobal(offset) => vec![OP_GET_GLOBAL, offset],
             Instruction::OpSetGlobal(offset) => vec![OP_SET_GLOBAL, offset],
             Instruction::OpGetLocal(offset) => vec![OP_GET_LOCAL, offset],
             Instruction::OpSetLocal(offset) => vec![OP_SET_LOCAL, offset],
+            Instruction::OpGetUpval(offset) => vec![OP_GET_UPVAL, offset],
+            Instruction::OpSetUpval(offset) => vec![OP_SET_UPVAL, offset],
+            Instruction::OpCloseUpval => vec![OP_CLOSE_UPVAL],
             Instruction::OpJumpIfFalse(offset) => {
                 let mut res = vec![OP_JUMP_IF_FALSE];
                 res.append(&mut offset.encode());
@@ -171,11 +186,16 @@ impl Chunk {
             OP_CONSTANT => (2, Instruction::OpConstant(self.read_u8(index + 1))),
             OP_CALL => (2, Instruction::OpCall(self.read_u8(index + 1))),
             OP_CLOSURE => (2, Instruction::OpClosure(self.read_u8(index + 1))),
+            OP_CAPTURE_LOCAL => (2, Instruction::OpCaptureLocal(self.read_u8(index + 1))),
+            OP_CAPTURE_UPVAL => (2, Instruction::OpCaptureUpval(self.read_u8(index + 1))),
             OP_DEFINE_GLOBAL => (2, Instruction::OpDefineGlobal(self.read_u8(index + 1))),
             OP_GET_GLOBAL => (2, Instruction::OpGetGlobal(self.read_u8(index + 1))),
             OP_SET_GLOBAL => (2, Instruction::OpSetGlobal(self.read_u8(index + 1))),
             OP_GET_LOCAL => (2, Instruction::OpGetLocal(self.read_u8(index + 1))),
             OP_SET_LOCAL => (2, Instruction::OpSetLocal(self.read_u8(index + 1))),
+            OP_GET_UPVAL => (2, Instruction::OpGetUpval(self.read_u8(index + 1))),
+            OP_SET_UPVAL => (2, Instruction::OpSetUpval(self.read_u8(index + 1))),
+            OP_CLOSE_UPVAL => (1, Instruction::OpCloseUpval),
             OP_JUMP_IF_FALSE => (3, Instruction::OpJumpIfFalse(self.read_u16(index + 1))),
             OP_JUMP => (3, Instruction::OpJump(self.read_u16(index + 1))),
             OP_LOOP => (3, Instruction::OpLoop(self.read_u16(index + 1))),

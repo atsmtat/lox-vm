@@ -8,6 +8,7 @@ mod scanner;
 mod value;
 mod vm;
 
+use std::fs;
 use std::io::{self, BufRead, Write};
 
 fn interpret(source: &str) {
@@ -33,7 +34,10 @@ fn run_repl() {
     }
 }
 
-fn run_file(_: &str) {}
+fn run_file(fname: &str) {
+    let content = fs::read_to_string(fname).expect("error reading the file");
+    interpret(&content);
+}
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -42,7 +46,7 @@ fn main() {
             run_repl();
         }
         1 => {
-            run_file(&args[1]);
+            run_file(&args[0]);
         }
         _ => {
             eprintln!("Usage: lox_vm [path]");

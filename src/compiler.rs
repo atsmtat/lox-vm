@@ -22,6 +22,9 @@ struct Local<'a> {
     name_token: Token<'a>,
     depth: usize,
     initialized: bool,
+
+    // whether this local is captured by an upvalue (of a closure)
+    is_captured: bool,
 }
 
 impl<'a> Local<'a> {
@@ -30,6 +33,7 @@ impl<'a> Local<'a> {
             name_token,
             depth,
             initialized: false,
+            is_captured: false,
         }
     }
 
@@ -43,13 +47,45 @@ enum FunKind {
     Function,
 }
 
+struct UpValue<'a> {
+    name_token: Token<'a>,
+
+    /// offset into enclosing function's `locals` table, if this upvalue
+    /// represents a local variable of enclosing function. Otherwise
+    /// it's an offset into enclosing function's `upvalues` table.
+    offset: usize,
+
+    /// if this upvalue represents local variable of enclosing function.
+    is_local: bool,
+}
+
+impl<'a> UpValue<'a> {
+    pub fn new(name_token: Token<'a>, offset: usize, is_local: bool) -> Self {
+        UpValue {
+            name_token,
+            offset,
+            is_local,
+        }
+    }
+
+    pub fn var_name(&self) -> &str {
+        self.name_token.lexeme
+    }
+}
+
 struct FunState<'a> {
     name: Gc<StrObj>,
     arity: u8,
     locals: Vec<Local<'a>>,
+    upvalues: Vec<UpValue<'a>>,
     scope_depth: usize,
     chunk: Chunk,
     kind: FunKind,
+}
+
+enum ResolvedVar {
+    Local(usize),
+    Upval(usize),
 }
 
 enum LookupError {
@@ -63,6 +99,7 @@ impl<'a> FunState<'a> {
             name,
             arity: 0,
             locals: Vec::new(),
+            upvalues: Vec::new(),
             scope_depth: 0,
             chunk: Chunk::new(),
             kind,
@@ -92,7 +129,7 @@ impl<'a> FunState<'a> {
         self.locals.len()
     }
 
-    fn resolve_local(&self, name: &str) -> Result<u8, LookupError> {
+    fn resolve_local(&self, name: &str) -> Result<ResolvedVar, LookupError> {
         if let Some((r_ix, found)) = self
             .locals
             .iter()
@@ -103,8 +140,21 @@ impl<'a> FunState<'a> {
             if !found.initialized {
                 return Err(LookupError::ResolvedUninit);
             }
-            return Ok((self.locals.len() - r_ix - 1) as u8);
-        }
+
+            let offset = self.locals.len() - r_ix - 1;
+            return Ok(ResolvedVar::Local(offset));
+        };
+
+        if let Some((r_ix, _found)) = self
+            .upvalues
+            .iter()
+            .rev()
+            .enumerate()
+            .find(|item| item.1.var_name() == name)
+        {
+            return Ok(ResolvedVar::Upval(self.upvalues.len() - r_ix - 1));
+        };
+
         return Err(LookupError::Unresolved);
     }
 }
@@ -161,15 +211,16 @@ impl<'a> Parser<'a> {
 
         if !self.had_error {
             self.emit_return(false);
-            return Some(self.end_fun());
+            Some(self.end_fun().0)
+        } else {
+            None
         }
-        None
     }
 
-    fn end_fun(&mut self) -> Gc<FnObj> {
+    fn end_fun(&mut self) -> (Gc<FnObj>, Vec<UpValue<'a>>) {
         let fun = self.fun_states.pop().expect("no function to end");
         let fn_obj = FnObj::new(fun.chunk, fun.arity, fun.name);
-        self.heap.allocate(fn_obj)
+        (self.heap.allocate(fn_obj), fun.upvalues)
     }
 
     // === function state management ===
@@ -197,8 +248,12 @@ impl<'a> Parser<'a> {
             .count();
 
         while drop_count > 0 {
-            self.fun_mut().locals.pop();
-            self.emit_instruction(Instruction::OpPop, self.curr_line);
+            let local = self.fun_mut().locals.pop().unwrap();
+            if local.is_captured {
+                self.emit_instruction(Instruction::OpCloseUpval, self.curr_line);
+            } else {
+                self.emit_instruction(Instruction::OpPop, self.curr_line);
+            }
             drop_count -= 1;
         }
     }
@@ -429,10 +484,27 @@ impl<'a> Parser<'a> {
             } => name,
         };
 
-        let fn_obj = self.function(fun_name.to_string());
+        // compile the function
+        self.function(fun_name.to_string());
+
+        let (fn_obj, upvalues) = self.end_fun();
         // store FnObj in constant table, and emit instruction to load it on the stack.
         let offset = self.emit_constant(Value::Function(fn_obj));
         self.emit_instruction(Instruction::OpClosure(offset), self.curr_line);
+
+        for upval in upvalues {
+            if upval.is_local {
+                self.emit_instruction(
+                    Instruction::OpCaptureLocal(upval.offset as u8),
+                    self.curr_line,
+                );
+            } else {
+                self.emit_instruction(
+                    Instruction::OpCaptureUpval(upval.offset as u8),
+                    self.curr_line,
+                );
+            }
+        }
 
         // define function
         match var_kind {
@@ -447,7 +519,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn function(&mut self, name: String) -> Gc<FnObj> {
+    fn function(&mut self, name: String) {
         let fun_name = self.heap.allocate_string(name);
         self.fun_states
             .push(FunState::new(fun_name, FunKind::Function));
@@ -482,7 +554,6 @@ impl<'a> Parser<'a> {
         self.consume(TokenKind::RightBrace);
 
         self.emit_return(true);
-        self.end_fun()
     }
 
     fn return_statement(&mut self) {
@@ -588,16 +659,27 @@ impl<'a> Parser<'a> {
         let var_name = tok.lexeme.to_string();
         let is_assign = can_assign && self.consume_if(TokenKind::Equal).is_some();
 
-        match self.fun().resolve_local(&var_name) {
-            Ok(offset) => {
-                // found a local variable
-                if is_assign {
-                    self.expression();
-                    self.emit_instruction(Instruction::OpSetLocal(offset), tok.line);
-                } else {
-                    self.emit_instruction(Instruction::OpGetLocal(offset), tok.line);
+        match self.resolve_variable(tok.clone()) {
+            Ok(res_var) => match res_var {
+                ResolvedVar::Local(offset) => {
+                    // found a local variable
+                    if is_assign {
+                        self.expression();
+                        self.emit_instruction(Instruction::OpSetLocal(offset as u8), tok.line);
+                    } else {
+                        self.emit_instruction(Instruction::OpGetLocal(offset as u8), tok.line);
+                    }
                 }
-            }
+                ResolvedVar::Upval(offset) => {
+                    // found a closed-over variable
+                    if is_assign {
+                        self.expression();
+                        self.emit_instruction(Instruction::OpSetUpval(offset as u8), tok.line);
+                    } else {
+                        self.emit_instruction(Instruction::OpGetUpval(offset as u8), tok.line);
+                    }
+                }
+            },
             Err(err) => match err {
                 LookupError::Unresolved => {
                     // no local with this name, assume it's a global
@@ -620,6 +702,65 @@ impl<'a> Parser<'a> {
                 }
             },
         }
+    }
+
+    fn resolve_variable(&mut self, token: Token<'a>) -> Result<ResolvedVar, LookupError> {
+        let name = token.lexeme;
+        let mut resolved: Option<(ResolvedVar, usize)> = None;
+
+        for (depth, fs) in self.fun_states.iter_mut().rev().enumerate() {
+            match fs.resolve_local(name) {
+                Ok(res_var) => {
+                    resolved = Some((res_var, depth));
+                    break;
+                }
+                Err(err) => match err {
+                    LookupError::ResolvedUninit => {
+                        return Err(err);
+                    }
+                    _ => {}
+                },
+            }
+        }
+
+        if let Some((mut res_var, depth)) = resolved {
+            let resolved_fs_ix = self.fun_states.len() - depth - 1;
+            let mut max_upvals_error: Option<Gc<StrObj>> = None;
+
+            if depth != 0 {
+                // must do a capture
+                let resolved_fs = &mut self.fun_states[resolved_fs_ix];
+                if let ResolvedVar::Local(offset) = res_var {
+                    resolved_fs.locals[offset].is_captured = true;
+                }
+            }
+
+            for fs in self.fun_states.iter_mut().skip(resolved_fs_ix + 1) {
+                match res_var {
+                    ResolvedVar::Upval(offset) => {
+                        fs.upvalues.push(UpValue::new(token.clone(), offset, false));
+                    }
+                    ResolvedVar::Local(offset) => {
+                        fs.upvalues.push(UpValue::new(token.clone(), offset, true));
+                    }
+                }
+
+                if fs.upvalues.len() >= u8::MAX.into() {
+                    max_upvals_error = Some(fs.name);
+                }
+                res_var = ResolvedVar::Upval(fs.upvalues.len() - 1);
+            }
+
+            if let Some(fun_name) = max_upvals_error {
+                self.report_error(
+                    self.curr_line,
+                    &format!("too many closure variables in function {}", fun_name),
+                );
+            }
+            return Ok(res_var);
+        }
+
+        return Err(LookupError::Unresolved);
     }
 
     fn literal(&mut self, tok: Token<'a>, _: bool) {

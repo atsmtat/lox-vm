@@ -1,6 +1,7 @@
 use crate::chunk::Chunk;
 use crate::memory::{Gc, Trace};
 use crate::value::Value;
+use core::cell::RefCell;
 use std::borrow;
 use std::cmp;
 use std::fmt;
@@ -100,15 +101,50 @@ impl fmt::Display for NativeObj {
 
 impl Trace for NativeObj {}
 
+// === UpvalueObj ===
+#[derive(Debug)]
+pub enum Capture {
+    // variable is still live/open on the stack at the given stack slot.
+    Open(usize),
+
+    // variable has been hoisted up to the heap, and is owned by this capture.
+    Closed(Value),
+}
+
+#[derive(Debug)]
+pub struct UpvalueObj {
+    pub capture: RefCell<Capture>,
+}
+
+impl UpvalueObj {
+    pub fn new(capture: Capture) -> Self {
+        UpvalueObj {
+            capture: RefCell::new(capture),
+        }
+    }
+}
+
+impl fmt::Display for UpvalueObj {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("<upvalue>")
+    }
+}
+
+impl Trace for UpvalueObj {}
+
 // === ClosureObj ===
 #[derive(Debug)]
 pub struct ClosureObj {
     pub function: Gc<FnObj>,
+    pub captured_upvals: RefCell<Vec<Gc<UpvalueObj>>>,
 }
 
 impl ClosureObj {
     pub fn new(function: Gc<FnObj>) -> Self {
-        ClosureObj { function }
+        ClosureObj {
+            function,
+            captured_upvals: RefCell::new(Vec::new()),
+        }
     }
 }
 

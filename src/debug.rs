@@ -89,6 +89,14 @@ impl<'a> Iterator for Disassembler<'a> {
                 Instruction::OpSetLocal(stack_slot) => {
                     result.push_str(format!("{:<20} {:04}", "OP_SET_LOCAL", stack_slot).as_str());
                 }
+
+                Instruction::OpGetUpval(offset) => {
+                    result.push_str(format!("{:<20} {:04}", "OP_GET_UPVAL", offset).as_str());
+                }
+                Instruction::OpSetUpval(offset) => {
+                    result.push_str(format!("{:<20} {:04}", "OP_SET_UPVAL", offset).as_str());
+                }
+
                 Instruction::OpJumpIfFalse(jump) => {
                     result.push_str(
                         format!(
@@ -136,6 +144,15 @@ impl<'a> Iterator for Disassembler<'a> {
                         .as_str(),
                     );
                 }
+                Instruction::OpCaptureLocal(stack_slot) => {
+                    result
+                        .push_str(format!("{:<20} {:04}", "OP_CAPTURE_LOCAL", stack_slot).as_str());
+                }
+                Instruction::OpCaptureUpval(stack_slot) => {
+                    result
+                        .push_str(format!("{:<20} {:04}", "OP_CAPTURE_UPVAL", stack_slot).as_str());
+                }
+                Instruction::OpCloseUpval => result.push_str("OP_CLOSE_UPVAL"),
                 Instruction::OpNegate => result.push_str("OP_NEGATE"),
                 Instruction::OpAdd => result.push_str("OP_ADD"),
                 Instruction::OpSubtract => result.push_str("OP_SUBTRACT"),
