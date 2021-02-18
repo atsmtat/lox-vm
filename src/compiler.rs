@@ -183,7 +183,6 @@ enum Precedence {
     Factor,
     Unary,
     Call,
-    Primary,
 }
 
 enum VarKind {
