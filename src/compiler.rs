@@ -1,5 +1,8 @@
 use crate::chunk::{Chunk, Instruction};
+
+#[cfg(feature = "disassemble")]
 use crate::debug;
+
 use crate::memory::{Gc, Heap};
 use crate::object::{FnObj, StrObj};
 use crate::scanner::{Scanner, ScannerError, Token, TokenKind};

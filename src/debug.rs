@@ -1,4 +1,62 @@
-use crate::chunk::{Chunk, Instruction, InstructionIter};
+use crate::chunk::{Chunk, Instruction};
+use crate::memory::Gc;
+use crate::object::FnObj;
+use crate::value::Value;
+
+pub struct InstructionIter<'a> {
+    chunk: &'a Chunk,
+    ip: usize,
+}
+
+impl<'a> InstructionIter<'a> {
+    pub fn new(chunk: &'a Chunk) -> Self {
+        InstructionIter { chunk, ip: 0 }
+    }
+}
+
+impl<'a> Iterator for InstructionIter<'a> {
+    type Item = (usize, Instruction);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.ip >= self.chunk.code_len() {
+            return None;
+        }
+        let (instr_size, instr) = self.chunk.read_instruction(self.ip);
+        let result = (self.ip, instr);
+        self.ip += instr_size as usize;
+        Some(result)
+    }
+}
+
+pub struct FunIter<'a> {
+    const_iter: std::slice::Iter<'a, Value>,
+}
+
+impl<'a> FunIter<'a> {
+    fn new(chunk: &'a Chunk) -> Self {
+        FunIter {
+            const_iter: chunk.constants.iter(),
+        }
+    }
+}
+
+impl<'a> Iterator for FunIter<'a> {
+    type Item = Gc<FnObj>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        while let Some(val) = self.const_iter.next() {
+            match val {
+                Value::Function(fn_obj) => {
+                    return Some(*fn_obj);
+                }
+                _ => {
+                    continue;
+                }
+            }
+        }
+        return None;
+    }
+}
 
 struct Disassembler<'a> {
     chunk: &'a Chunk,
@@ -8,7 +66,7 @@ struct Disassembler<'a> {
 impl<'a> Disassembler<'a> {
     pub fn new(chunk: &'a Chunk) -> Self {
         Disassembler {
-            iter: chunk.iter(),
+            iter: InstructionIter::new(chunk),
             chunk,
         }
     }
@@ -184,7 +242,7 @@ pub fn disassemble_chunk(chunk: &Chunk, name: &str) {
         println!("{}", instr_str);
     }
 
-    for fun in chunk.fun_iter() {
+    for fun in FunIter::new(chunk) {
         println!("");
         disassemble_chunk(&fun.chunk, &fun.name().0)
     }

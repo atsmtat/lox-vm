@@ -1,5 +1,3 @@
-use crate::memory::Gc;
-use crate::object::FnObj;
 use crate::value::Value;
 use std::convert::TryInto;
 
@@ -138,7 +136,7 @@ impl ByteCode for Instruction {
 
 pub struct Chunk {
     code: Vec<u8>,
-    constants: Vec<Value>,
+    pub constants: Vec<Value>,
     lines: Vec<u32>,
 }
 
@@ -228,74 +226,12 @@ impl Chunk {
         self.constants[index as usize]
     }
 
+    #[cfg(feature = "disassemble")]
     pub fn get_constant_checked(&self, index: u8) -> Option<&Value> {
         self.constants.get(index as usize)
     }
 
     pub fn get_line(&self, index: usize) -> u32 {
         self.lines[index]
-    }
-
-    pub fn iter(&self) -> InstructionIter {
-        InstructionIter::new(&self)
-    }
-
-    pub fn fun_iter(&self) -> FunIter {
-        FunIter::new(&self)
-    }
-}
-
-pub struct InstructionIter<'a> {
-    chunk: &'a Chunk,
-    ip: usize,
-}
-
-impl<'a> InstructionIter<'a> {
-    pub fn new(chunk: &'a Chunk) -> Self {
-        InstructionIter { chunk, ip: 0 }
-    }
-}
-
-impl<'a> Iterator for InstructionIter<'a> {
-    type Item = (usize, Instruction);
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.ip >= self.chunk.code_len() {
-            return None;
-        }
-        let (instr_size, instr) = self.chunk.read_instruction(self.ip);
-        let result = (self.ip, instr);
-        self.ip += instr_size as usize;
-        Some(result)
-    }
-}
-
-pub struct FunIter<'a> {
-    const_iter: std::slice::Iter<'a, Value>,
-}
-
-impl<'a> FunIter<'a> {
-    fn new(chunk: &'a Chunk) -> Self {
-        FunIter {
-            const_iter: chunk.constants.iter(),
-        }
-    }
-}
-
-impl<'a> Iterator for FunIter<'a> {
-    type Item = Gc<FnObj>;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        while let Some(val) = self.const_iter.next() {
-            match val {
-                Value::Function(fn_obj) => {
-                    return Some(*fn_obj);
-                }
-                _ => {
-                    continue;
-                }
-            }
-        }
-        return None;
     }
 }

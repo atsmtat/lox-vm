@@ -1,5 +1,6 @@
 mod chunk;
 mod compiler;
+#[cfg(feature = "disassemble")]
 mod debug;
 mod error;
 mod memory;
