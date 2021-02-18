@@ -1,25 +1,5 @@
-mod chunk;
-mod compiler;
-mod debug;
-mod error;
-mod memory;
-mod object;
-mod scanner;
-mod value;
-mod vm;
-
 use std::fs;
 use std::io::{self, BufRead, Write};
-
-fn interpret(source: &str) {
-    let mut heap = memory::Heap::new();
-    if let Some(script_fn) = compiler::compile(&source, &mut heap) {
-        let mut vm = vm::Vm::new(script_fn, &mut heap);
-        vm.run().unwrap_or_else(|err| {
-            eprintln!("{}", err);
-        });
-    }
-}
 
 fn run_repl() {
     loop {
@@ -30,13 +10,13 @@ fn run_repl() {
         let stdin = io::stdin();
         stdin.lock().read_line(&mut input).unwrap();
         println!("");
-        interpret(&input);
+        lox_vm::interpret(&input);
     }
 }
 
 fn run_file(fname: &str) {
     let content = fs::read_to_string(fname).expect("error reading the file");
-    interpret(&content);
+    lox_vm::interpret(&content);
 }
 
 fn main() {
