@@ -9,9 +9,9 @@ pub fn compile(source: &str, heap: &mut Heap) -> Option<Gc<FnObj>> {
     let scanner = Scanner::new(source);
     let mut parser = Parser::new(scanner, heap);
     if let Some(script_fn) = parser.parse() {
-        if cfg!(debug_assertions) {
-            debug::disassemble_chunk(&script_fn.chunk, "script");
-        }
+        #[cfg(feature = "disassemble")]
+        debug::disassemble_chunk(&script_fn.chunk, "script");
+
         Some(script_fn)
     } else {
         None
