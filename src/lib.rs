@@ -8,10 +8,12 @@ mod scanner;
 mod value;
 mod vm;
 
-pub fn interpret(source: &str) {
+use std::io;
+
+pub fn interpret<Out: io::Write>(source: &str, stdout: &mut Out) {
     let mut heap = memory::Heap::new();
     if let Some(script_fn) = compiler::compile(&source, &mut heap) {
-        let mut vm = vm::Vm::new(script_fn, &mut heap);
+        let mut vm = vm::Vm::new(script_fn, &mut heap, stdout);
         vm.run().unwrap_or_else(|err| {
             eprintln!("{}", err);
         });

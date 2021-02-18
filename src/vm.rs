@@ -5,6 +5,7 @@ use crate::object::{Capture, ClosureObj, FnObj, NativeFn, NativeObj, StrObj, Upv
 use crate::value::Value;
 use fnv::FnvHashMap;
 use std::collections::BTreeMap;
+use std::io;
 use std::time::SystemTime;
 
 // native function
@@ -24,22 +25,24 @@ struct CallFrame {
     ip: usize,
 }
 
-pub struct Vm<'a> {
+pub struct Vm<'a, Out: io::Write> {
     call_frames: Vec<CallFrame>,
     stack: Vec<Value>,
     heap: &'a mut Heap,
     globals: FnvHashMap<Gc<StrObj>, Value>,
     open_upvalues: BTreeMap<usize, Gc<UpvalueObj>>,
+    stdout: &'a mut Out,
 }
 
-impl<'a> Vm<'a> {
-    pub fn new(script_fn: Gc<FnObj>, heap: &'a mut Heap) -> Self {
+impl<'a, Out: io::Write> Vm<'a, Out> {
+    pub fn new(script_fn: Gc<FnObj>, heap: &'a mut Heap, stdout: &'a mut Out) -> Self {
         let mut vm = Vm {
             call_frames: Vec::with_capacity(FRAMES_MAX),
             stack: Vec::with_capacity(STACK_MAX),
-            heap: heap,
+            heap,
             globals: FnvHashMap::default(),
             open_upvalues: BTreeMap::new(),
+            stdout,
         };
 
         vm.push(Value::Function(script_fn));
@@ -125,7 +128,8 @@ impl<'a> Vm<'a> {
                 }
 
                 Instruction::OpPrint => {
-                    println!("{}", self.pop()?);
+                    let val = self.pop()?;
+                    writeln!(self.stdout, "{}", val).unwrap();
                 }
 
                 Instruction::OpNegate => {

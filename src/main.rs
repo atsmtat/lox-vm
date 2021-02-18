@@ -10,13 +10,19 @@ fn run_repl() {
         let stdin = io::stdin();
         stdin.lock().read_line(&mut input).unwrap();
         println!("");
-        lox_vm::interpret(&input);
+
+        let stdout = io::stdout();
+        let mut handle = stdout.lock();
+        lox_vm::interpret(&input, &mut handle);
     }
 }
 
 fn run_file(fname: &str) {
     let content = fs::read_to_string(fname).expect("error reading the file");
-    lox_vm::interpret(&content);
+
+    let stdout = io::stdout();
+    let mut handle = stdout.lock();
+    lox_vm::interpret(&content, &mut handle);
 }
 
 fn main() {
