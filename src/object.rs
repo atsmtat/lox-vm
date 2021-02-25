@@ -11,8 +11,6 @@ use std::hash;
 #[derive(Debug)]
 pub struct StrObj(pub String);
 
-impl Trace for StrObj {}
-
 // Since all strings are interned, string equality is same as StrObj box pointer
 // equality.
 impl cmp::PartialEq for Gc<StrObj> {
@@ -39,6 +37,10 @@ impl fmt::Display for StrObj {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_fmt(format_args!("\"{}\"", &self.0))
     }
+}
+
+impl Trace for StrObj {
+    fn trace(&mut self) {}
 }
 
 // === FnObj ===
@@ -77,7 +79,9 @@ impl fmt::Display for FnObj {
     }
 }
 
-impl Trace for FnObj {}
+impl Trace for FnObj {
+    fn trace(&mut self) {}
+}
 
 // === NativeObj ===
 pub type NativeFn = fn() -> Value;
@@ -99,7 +103,9 @@ impl fmt::Display for NativeObj {
     }
 }
 
-impl Trace for NativeObj {}
+impl Trace for NativeObj {
+    fn trace(&mut self) {}
+}
 
 // === UpvalueObj ===
 #[derive(Debug)]
@@ -130,7 +136,9 @@ impl fmt::Display for UpvalueObj {
     }
 }
 
-impl Trace for UpvalueObj {}
+impl Trace for UpvalueObj {
+    fn trace(&mut self) {}
+}
 
 // === ClosureObj ===
 #[derive(Debug)]
@@ -154,4 +162,6 @@ impl fmt::Display for ClosureObj {
     }
 }
 
-impl Trace for ClosureObj {}
+impl Trace for ClosureObj {
+    fn trace(&mut self) {}
+}

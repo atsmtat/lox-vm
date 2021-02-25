@@ -4,10 +4,28 @@ use std::fmt;
 use std::ops::Deref;
 use std::ptr::NonNull;
 
-pub trait Trace {}
+pub trait Trace {
+    fn trace(&mut self);
+}
 
 pub struct Gc<T: Trace + 'static> {
     ptr: NonNull<GcBox<T>>,
+}
+
+impl<T: Trace> Trace for Gc<T> {
+    fn trace(&mut self) {
+        unsafe {
+            match (*self.ptr.as_ptr()).header.color {
+                Color::White => {
+                    (*self.ptr.as_ptr()).header.color = Color::Gray;
+                    // trace the objects reachable via this value
+                    (*self.ptr.as_ptr()).value.trace();
+                    (*self.ptr.as_ptr()).header.color = Color::Black;
+                }
+                Color::Black | Color::Gray => {}
+            }
+        }
+    }
 }
 
 impl<T: Trace> Gc<T> {
@@ -43,9 +61,15 @@ impl<T: Trace + fmt::Display> fmt::Display for Gc<T> {
     }
 }
 
+enum Color {
+    White, // undiscovered
+    Gray,  // discovered
+    Black, // processed
+}
+
 struct GcBoxHeader {
     next: Option<NonNull<GcBox<dyn Trace>>>,
-    marked: bool,
+    color: Color,
 }
 
 struct GcBox<T: Trace + ?Sized + 'static> {
@@ -58,7 +82,7 @@ impl<T: Trace> GcBox<T> {
         let gc_box = Box::into_raw(Box::new(GcBox {
             header: GcBoxHeader {
                 next: None,
-                marked: false,
+                color: Color::White,
             },
             value: value,
         }));
@@ -72,15 +96,22 @@ impl<T: Trace + ?Sized> GcBox<T> {
     }
 }
 
+// unit-like struct to be used as a dummy head of the linked list of
+// objects.
+struct DummyHead;
+impl Trace for DummyHead {
+    fn trace(&mut self) {}
+}
+
 pub struct Heap {
-    head: Option<NonNull<GcBox<dyn Trace>>>,
+    head: NonNull<GcBox<dyn Trace>>,
     interned_str: FnvHashSet<Gc<StrObj>>,
 }
 
 impl Heap {
     pub fn new() -> Self {
         Heap {
-            head: None,
+            head: GcBox::new(DummyHead),
             interned_str: FnvHashSet::default(),
         }
     }
@@ -88,16 +119,9 @@ impl Heap {
     pub fn allocate<T: Trace>(&mut self, val: T) -> Gc<T> {
         // allocate the box
         let gc_box = GcBox::new(val);
-        match self.head {
-            Some(curr_head) => {
-                unsafe {
-                    (*gc_box.as_ptr()).header.next = Some(curr_head);
-                }
-                self.head = Some(gc_box);
-            }
-            None => {
-                self.head = Some(gc_box);
-            }
+        unsafe {
+            (*gc_box.as_ptr()).header.next = (*self.head.as_ptr()).header.next;
+            (*self.head.as_ptr()).header.next = Some(gc_box);
         }
         Gc { ptr: gc_box }
     }
@@ -113,41 +137,24 @@ impl Heap {
 
     pub fn sweep(&mut self) {
         let mut next_box;
-        let mut tail_ptr;
-        match self.head {
-            Some(curr_head) => {
-                tail_ptr = curr_head;
-                unsafe { next_box = &(*curr_head.as_ptr()).header.next }
-            }
-            None => {
-                return;
-            } // empty list
-        }
-        let head_p = tail_ptr;
+        let mut tail_ptr = self.head;
+        unsafe { next_box = &(*tail_ptr.as_ptr()).header.next }
 
         while let Some(gc_box) = next_box {
             unsafe {
                 next_box = &(*gc_box.as_ptr()).header.next;
-                if !(*gc_box.as_ptr()).header.marked {
-                    // unmarked, so let it drop by giving ownership to a Box
-                    let _owning_box = Box::from_raw(gc_box.as_ptr());
-                    (*tail_ptr.as_ptr()).header.next = *next_box;
-                } else {
-                    // reset the mark
-                    (*gc_box.as_ptr()).header.marked = false;
-                    tail_ptr = *gc_box;
+                match (*gc_box.as_ptr()).header.color {
+                    Color::White => {
+                        // unmarked, so let it drop by giving ownership to a Box
+                        let _owning_box = Box::from_raw(gc_box.as_ptr());
+                        (*tail_ptr.as_ptr()).header.next = *next_box;
+                    }
+                    Color::Gray | Color::Black => {
+                        // reset the mark
+                        (*gc_box.as_ptr()).header.color = Color::White;
+                        tail_ptr = *gc_box;
+                    }
                 }
-            }
-        }
-
-        unsafe {
-            if !(*head_p.as_ptr()).header.marked {
-                // head is unmarked too, so drop it the same way
-                let owning_box = Box::from_raw(head_p.as_ptr());
-                self.head = owning_box.header.next;
-            } else {
-                // reset the mark
-                (*head_p.as_ptr()).header.marked = false;
             }
         }
     }

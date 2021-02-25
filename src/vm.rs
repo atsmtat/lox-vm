@@ -1,6 +1,6 @@
 use crate::chunk::Instruction;
 use crate::error::{ErrorKind, RuntimeError, StackFrame, VmError};
-use crate::memory::{Gc, Heap};
+use crate::memory::{Gc, Heap, Trace};
 use crate::object::{Capture, ClosureObj, FnObj, NativeFn, NativeObj, StrObj, UpvalueObj};
 use crate::value::Value;
 use fnv::FnvHashMap;
@@ -507,5 +507,17 @@ impl<'a, Out: io::Write> Vm<'a, Out> {
         let mut new_str = String::from(&lstr.0);
         new_str.push_str(&rstr.0);
         Value::String(self.heap.allocate_string(new_str))
+    }
+
+    // === Gc APIs ===
+    #[allow(dead_code)]
+    fn collect(&mut self) {
+        self.mark();
+    }
+
+    fn mark(&mut self) {
+        for val in &mut self.stack {
+            val.trace();
+        }
     }
 }

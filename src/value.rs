@@ -1,4 +1,4 @@
-use crate::memory::Gc;
+use crate::memory::{Gc, Trace};
 use crate::object::{ClosureObj, FnObj, NativeObj, StrObj};
 use std::cmp::PartialEq;
 use std::fmt;
@@ -58,6 +58,18 @@ impl PartialEq for Value {
                 _ => false,
             },
             _ => false,
+        }
+    }
+}
+
+impl Trace for Value {
+    fn trace(&mut self) {
+        match self {
+            Value::String(gc_str) => gc_str.trace(),
+            Value::Function(gc_fun) => gc_fun.trace(),
+            Value::Native(gc_nat) => gc_nat.trace(),
+            Value::Closure(gc_clos) => gc_clos.trace(),
+            _ => {}
         }
     }
 }
