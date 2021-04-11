@@ -13,3 +13,8 @@ disassemble = []
 
 [dependencies]
 fnv = "1.0.7"
+clap = "~2.27.0"
+
+[[bin]]
+name = "loxi"
+path = "src/main.rs"

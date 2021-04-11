@@ -1,3 +1,4 @@
+use clap::{App, Arg};
 use std::fs;
 use std::io::{self, BufRead, Write};
 
@@ -26,17 +27,20 @@ fn run_file(fname: &str) {
 }
 
 fn main() {
-    let args: Vec<String> = std::env::args().skip(1).collect();
-    match args.len() {
-        0 => {
-            run_repl();
-        }
-        1 => {
-            run_file(&args[0]);
-        }
-        _ => {
-            eprintln!("Usage: lox_vm [path]");
-            std::process::exit(64);
-        }
+    let matches = App::new("loxi")
+        .version("0.1.0")
+        .about("Interpreter for Lox scripts")
+        .arg(
+            Arg::with_name("file")
+                .help("Input script")
+                .required(false)
+                .index(1),
+        )
+        .get_matches();
+
+    if let Some(f) = matches.value_of("file") {
+        run_file(f);
+    } else {
+        run_repl();
     }
 }

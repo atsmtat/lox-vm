@@ -9,6 +9,11 @@ Once you have installed [Rust](https://www.rust-lang.org/tools/install), lox-vm 
 $ cargo install --git https://github.com/atsmtat/lox-vm.git --branch main
 ```
 
+Binary is called `loxi`
+```
+$ loxi --help
+```
+
 ## Build ##
 lox-vm is written in Rust, so you need [Rust](https://www.rust-lang.org/tools/install) installed in order to compile it.
 To build lox-vm
